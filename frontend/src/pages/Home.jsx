@@ -575,7 +575,7 @@ const Home = ({ user }) => {
           </div>
 
           <div className="pt-10 border-t border-white/5 flex flex-col md:flex-row justify-between items-center gap-4">
-            <p className="text-white/30 text-xs text-center md:text-left">
+            <p className="text-white/30 text-xs text-center">
               © 2025 super gelatto Artigianale. Todos los derechos reservados.
             </p>
             <div className="flex gap-6 text-[10px] text-white/20 uppercase tracking-widest font-bold">

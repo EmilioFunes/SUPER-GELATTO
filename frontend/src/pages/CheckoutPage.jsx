@@ -22,7 +22,15 @@ const CheckoutPage = ({ user }) => {
       const response = await fetch('/api/orders', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: user?.id, total: totalPrice }),
+        body: JSON.stringify({ 
+          userId: user?.id, 
+          total: totalPrice,
+          items: cart.map(item => ({ 
+            name: item.nombre || item.name, 
+            quantity: item.quantity, 
+            price: item.precio 
+          }))
+        }),
       });
       if (response.ok) {
         clearCart();

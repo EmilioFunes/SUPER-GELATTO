@@ -209,11 +209,12 @@ app.get('/api/orders/:userId', async (req, res) => {
 });
 
 app.post('/api/orders', async (req, res) => {
-  const { userId, total } = req.body;
+  const { userId, total, items } = req.body;
 
   if (!userId || !total) return res.status(400).json({ message: 'Datos incompletos.' });
 
   try {
+    // 1. Registrar la venta en la base de datos
     const { data: newOrder, error } = await supabase
       .from('venta')
       .insert([{ 
@@ -224,6 +225,57 @@ app.post('/api/orders', async (req, res) => {
       .select().single();
 
     if (error) throw error;
+
+    // 2. Obtener datos del usuario para el correo
+    const { data: user, error: userError } = await supabase
+      .from('usuario')
+      .select('nombre, email')
+      .eq('id_usuario', userId)
+      .single();
+
+    if (user && !userError) {
+      // 3. Preparar detalles del pedido
+      const deliveryTime = Math.floor(Math.random() * (45 - 30 + 1) + 30); // 30-45 mins
+      const itemsHtml = items && items.length > 0 
+        ? `<ul>${items.map(item => `<li><strong>${item.name}</strong> x ${item.quantity} - $${item.price}</li>`).join('')}</ul>`
+        : '<p>Detalles del pedido no disponibles.</p>';
+
+      // 4. Enviar correo de confirmación
+      try {
+        const emailTransporter = await getTransporter();
+        const fromEmail = process.env.SMTP_USER || 'no-reply@supergelatto.com';
+        
+        await emailTransporter.sendMail({
+          from: `"super gelatto 🍦" <${fromEmail}>`,
+          to: user.email,
+          subject: '🍦 ¡Tu pedido está en camino!',
+          html: `
+            <div style="font-family: Arial, sans-serif; color: #333; max-width: 600px; margin: 0 auto; border: 1px solid #eee; padding: 20px; border-radius: 10px;">
+              <h2 style="color: #ac2a5d; text-align: center;">¡Hola ${user.nombre}!</h2>
+              <p style="font-size: 16px; text-align: center;">Gracias por elegir <strong>super gelatto</strong>. Tu pedido ha sido confirmado con éxito.</p>
+              
+              <div style="background-color: #f9f9f9; padding: 15px; border-radius: 8px; margin: 20px 0;">
+                <h3 style="margin-top: 0; color: #705d00;">Resumen de tu pedido:</h3>
+                ${itemsHtml}
+                <p style="font-size: 18px; border-top: 1px solid #ddd; padding-top: 10px;"><strong>Total: $${total}</strong></p>
+              </div>
+              
+              <div style="text-align: center; margin: 30px 0; padding: 20px; border: 2px dashed #ac2a5d; border-radius: 15px;">
+                <span style="font-size: 24px;">🚚</span>
+                <h3 style="margin: 10px 0;">Tiempo estimado de entrega:</h3>
+                <p style="font-size: 22px; font-weight: bold; color: #ac2a5d; margin: 0;">${deliveryTime} minutos</p>
+              </div>
+              
+              <p style="text-align: center; color: #888; font-size: 12px;">Si tienes alguna duda, contáctanos respondiendo a este correo.</p>
+              <p style="text-align: center; font-weight: bold; color: #ac2a5d;">¡Que lo disfrutes! 🍦✨</p>
+            </div>
+          `
+        });
+        console.log(`📧 Correo de confirmación enviado a: ${user.email}`);
+      } catch (mailErr) {
+        console.error('Error enviando correo de confirmación:', mailErr);
+      }
+    }
 
     return res.status(201).json({ message: 'Pedido creado exitosamente.', order: newOrder });
   } catch (error) {

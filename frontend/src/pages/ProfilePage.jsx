@@ -309,14 +309,14 @@ const ProfilePage = ({ user, onUpdateUser }) => {
                 </div>
               ) : (
                 <div className="overflow-x-auto -mx-2">
-                  <table className="w-full text-left border-separate border-spacing-y-4">
+                  <table className="w-full text-center border-separate border-spacing-y-4">
                     <thead>
                       <tr className="text-[10px] text-white/20 uppercase tracking-[0.2em] font-black">
-                        <th className="px-4 pb-2">ID Pedido</th>
-                        <th className="px-4 pb-2">Fecha</th>
-                        <th className="px-4 pb-2">Total</th>
-                        <th className="px-4 pb-2">Estado</th>
-                        <th className="px-4 pb-2 text-right">Detalle</th>
+                        <th className="px-4 pb-2 text-center">ID Pedido</th>
+                        <th className="px-4 pb-2 text-center">Fecha</th>
+                        <th className="px-4 pb-2 text-center">Total</th>
+                        <th className="px-4 pb-2 text-center">Estado</th>
+                        <th className="px-4 pb-2 text-center">Detalle</th>
                       </tr>
                     </thead>
                     <tbody className="text-sm">
@@ -341,8 +341,8 @@ const ProfilePage = ({ user, onUpdateUser }) => {
                               {order.estado || 'Entregado'}
                             </span>
                           </td>
-                          <td className="py-5 px-4 bg-white/[0.03] border-y border-r border-white/10 rounded-r-[18px] text-right group-hover:bg-white/[0.05] transition-colors">
-                            <button className="p-2 hover:bg-white/10 rounded-lg transition-colors text-white/20 hover:text-gold-premium">
+                          <td className="py-5 px-4 bg-white/[0.03] border-y border-r border-white/10 rounded-r-[18px] text-center group-hover:bg-white/[0.05] transition-colors">
+                            <button className="p-2 hover:bg-white/10 rounded-lg transition-colors text-white/20 hover:text-gold-premium mx-auto">
                               <ChevronRight size={18} />
                             </button>
                           </td>

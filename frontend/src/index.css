@@ -23,7 +23,7 @@
 
 @layer base {
   body {
-    @apply bg-background-dark text-white font-poppins antialiased;
+    @apply bg-background-dark text-white font-poppins antialiased text-center;
     background: radial-gradient(circle at top left, #1a162e 0%, #0d0a1a 100%);
     min-height: 100vh;
   }

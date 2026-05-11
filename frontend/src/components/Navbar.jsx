@@ -204,7 +204,7 @@ const Navbar = ({ user, onLogout }) => {
                 {/* 360 Builder — mobile */}
                 <button
                   onClick={scrollToBuilder}
-                  className="flex items-center gap-2 px-4 py-3 rounded-2xl bg-gradient-to-r from-amber-400/10 to-orange-500/10 border border-amber-400/30 text-amber-300 font-bold text-left hover:bg-amber-400/15 transition-all"
+                  className="flex items-center justify-center gap-2 px-4 py-3 rounded-2xl bg-gradient-to-r from-amber-400/10 to-orange-500/10 border border-amber-400/30 text-amber-300 font-bold text-center hover:bg-amber-400/15 transition-all"
                 >
                   <RotateCcw size={18} className="animate-spin" style={{ animationDuration: '3s' }} />
                   Gelato 360°
@@ -212,7 +212,7 @@ const Navbar = ({ user, onLogout }) => {
                 {/* SuperPoints — mobile */}
                 <button
                   onClick={scrollToSuperPoints}
-                  className="flex items-center gap-2 px-4 py-3 rounded-2xl bg-gradient-to-r from-yellow-400/10 to-amber-500/10 border border-yellow-400/30 text-yellow-300 font-bold text-left hover:bg-yellow-400/15 transition-all"
+                  className="flex items-center justify-center gap-2 px-4 py-3 rounded-2xl bg-gradient-to-r from-yellow-400/10 to-amber-500/10 border border-yellow-400/30 text-yellow-300 font-bold text-center hover:bg-yellow-400/15 transition-all"
                 >
                   <Star size={18} className="fill-yellow-300 text-yellow-300" />
                   SuperPoints
