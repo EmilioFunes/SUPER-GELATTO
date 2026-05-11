@@ -4,7 +4,7 @@ import { Canvas, useFrame } from '@react-three/fiber';
 import { OrbitControls, useGLTF, Environment, ContactShadows, Html } from '@react-three/drei';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, ShoppingCart } from 'lucide-react';
-import { useCart } from '../context/CartContext';
+import { useCart, formatPrice } from '../context/CartContext';
 
 // Silence THREE.Clock deprecation warning if it persists in the environment
 if (typeof window !== 'undefined') {
@@ -291,6 +291,12 @@ const GelatoBuilder3D = ({ user }) => {
   const [selectedToppings, setSelectedToppings] = useState([]);
   const [activeTab, setActiveTab] = useState('container');
 
+  // Calculate price: Base(10k) + Extra Scoops(2k each) + Toppings(1k each)
+  const basePrice = 10000;
+  const extraScoopsPrice = Math.max(0, selectedScoops.length - 1) * 2000;
+  const toppingsPrice = selectedToppings.length * 1000;
+  const total = basePrice + extraScoopsPrice + toppingsPrice;
+
   const handleAddToCart = () => {
     // SECURITY CHECK: Solo registrados en DB pueden comprar
     if (!user?.id) {
@@ -308,12 +314,6 @@ const GelatoBuilder3D = ({ user }) => {
         console.error('Error capturing 3D snapshot:', e);
       }
     }
-
-    // Calculate price: Base(10k) + Extra Scoops(2k each) + Toppings(1k each)
-    const basePrice = 10000;
-    const extraScoopsPrice = Math.max(0, selectedScoops.length - 1) * 2000;
-    const toppingsPrice = selectedToppings.length * 1000;
-    const total = basePrice + extraScoopsPrice + toppingsPrice;
 
     const containerName = containers.find(c => c.id === container)?.name || 'Gelato';
     const firstScoop = scoops.find(s => s.id === selectedScoops[0]);
@@ -619,7 +619,7 @@ const GelatoBuilder3D = ({ user }) => {
                   onClick={handleAddToCart}
                   className="w-full py-3 rounded-2xl bg-gradient-to-r from-amber-400 to-orange-500 text-background-dark font-bold text-sm uppercase tracking-widest shadow-lg shadow-amber-400/20 hover:shadow-amber-400/40 transition-shadow flex items-center justify-center gap-2"
                 >
-                  Confirmar y Añadir <ShoppingCart size={18} />
+                  Confirmar y Añadir ({formatPrice(total)}) <ShoppingCart size={18} />
                 </motion.button>
               </div>
             </div>

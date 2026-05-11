@@ -1,7 +1,7 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Trash2, Plus, Minus, ShoppingBag, ArrowRight } from 'lucide-react';
-import { useCart } from '../context/CartContext';
+import { useCart, formatPrice } from '../context/CartContext';
 import { Link } from 'react-router-dom';
 import FlavorImage from './FlavorImage';
 
@@ -55,7 +55,7 @@ const CartDrawer = ({ isOpen, onClose }) => {
                         <Trash2 size={14} />
                       </button>
                     </div>
-                    <p className="text-[10px] text-white/40 mb-2">${item.precio} c/u</p>
+                    <p className="text-[10px] text-white/40 mb-2">{formatPrice(item.precio || item.price)} c/u</p>
                     
                     <div className="flex justify-between items-center mt-2">
                       <div className="flex items-center bg-white/5 border border-white/10 rounded-md p-0.5">
@@ -67,7 +67,7 @@ const CartDrawer = ({ isOpen, onClose }) => {
                           <Plus size={10} />
                         </button>
                       </div>
-                      <span className="font-bold text-sm text-gold-premium">${(item.quantity * item.precio).toFixed(2)}</span>
+                      <span className="font-bold text-sm text-gold-premium">{formatPrice((item.quantity * (item.precio || item.price)))}</span>
                     </div>
                   </div>
                 </div>
@@ -80,7 +80,7 @@ const CartDrawer = ({ isOpen, onClose }) => {
             <div className="p-5 border-t border-white/10 bg-white/[0.03] space-y-3">
               <div className="flex justify-between items-end">
                 <span className="text-xs text-white/40 font-bold uppercase tracking-widest">Total</span>
-                <span className="text-2xl font-bold text-gold-premium">${totalPrice.toFixed(2)}</span>
+                <span className="text-2xl font-bold text-gold-premium">{formatPrice(totalPrice)}</span>
               </div>
               <Link 
                 to="/checkout" 

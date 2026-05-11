@@ -4,6 +4,15 @@ const CartContext = createContext();
 
 export const useCart = () => useContext(CartContext);
 
+export const formatPrice = (price) => {
+  return new Intl.NumberFormat('es-CO', {
+    style: 'currency',
+    currency: 'COP',
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0
+  }).format(price);
+};
+
 export const CartProvider = ({ children, user }) => {
   const userId = user?.id; // Usar el ID de la base de datos
   const [cart, setCart] = useState([]);
@@ -50,7 +59,7 @@ export const CartProvider = ({ children, user }) => {
   const clearCart = () => setCart([]);
 
   const totalItems = cart.reduce((sum, item) => sum + item.quantity, 0);
-  const totalPrice = cart.reduce((sum, item) => sum + (item.precio * item.quantity), 0);
+  const totalPrice = cart.reduce((sum, item) => sum + ((item.precio || item.price || 0) * item.quantity), 0);
 
   return (
     <CartContext.Provider value={{ 

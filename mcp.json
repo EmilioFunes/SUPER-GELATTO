@@ -4,11 +4,10 @@
       "command": "npx",
       "args": [
         "-y",
-        "@supabase/mcp-server-supabase@latest",
-        "--project-ref",
-        "gphzhnuueefghrcexros",
-        "--access-token",
-        "sbp_TOKEN_REMOVED_REMOVED"
+        "mcp-remote",
+        "https://mcp.supabase.com/mcp?project_ref=gphzhnuueefghrcexros",
+        "--header",
+        "Authorization: Bearer sbp_TOKEN_REMOVED_REMOVED"
       ]
     }
   }

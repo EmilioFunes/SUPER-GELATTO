@@ -3,11 +3,18 @@ const cors = require('cors');
 const bodyParser = require('body-parser');
 const crypto = require('crypto');
 const nodemailer = require('nodemailer');
-const bcrypt = require('bcrypt'); // <--- Importado
+const bcrypt = require('bcryptjs'); // Usamos bcryptjs para mejor compatibilidad en Windows
 const { createClient } = require('@supabase/supabase-js');
 require('dotenv').config();
 
-const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_KEY;
+
+if (!supabaseUrl || !supabaseKey) {
+  console.warn('⚠️ Advertencia: SUPABASE_URL o SUPABASE_KEY faltan en el archivo .env');
+}
+
+const supabase = createClient(supabaseUrl || '', supabaseKey || '');
 
 const app = express();
 const PORT = 5000;
@@ -15,7 +22,7 @@ const saltRounds = 10; // <--- Configuración de seguridad
 
 // Middleware
 app.use(cors());
-app.use(bodyParser.json());
+app.use(express.json()); // Usar el parser integrado de express
 
 // In-memory reset token store
 const resetTokens = [];

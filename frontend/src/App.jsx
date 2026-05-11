@@ -32,8 +32,11 @@ function App() {
   });
 
   const handleLogin = (userData) => {
-    setUser(userData);
-    sessionStorage.setItem('superGelatto_user', JSON.stringify(userData));
+    setUser(prev => {
+      const updated = prev ? { ...prev, ...userData } : userData;
+      sessionStorage.setItem('superGelatto_user', JSON.stringify(updated));
+      return updated;
+    });
   };
 
   const handleLogout = () => {

@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   X, ShoppingCart, Star, Flame, Droplets, Zap, Award, Clock, Leaf, Lock,
 } from 'lucide-react';
-import { useCart } from '../context/CartContext';
+import { useCart, formatPrice } from '../context/CartContext';
 
 const FlavorModal = ({ flavor, onClose, user }) => {
   const [qty, setQty] = useState(1);
@@ -227,7 +227,7 @@ const FlavorModal = ({ flavor, onClose, user }) => {
                         added ? (
                           <>✓ ¡Agregado al carrito!</>
                         ) : (
-                          <><ShoppingCart size={16} /> Agregar · {flavor.priceLabel}</>
+                          <><ShoppingCart size={16} /> Agregar · {formatPrice(flavor.price * qty)}</>
                         )
                       ) : (
                         <><Lock size={14} /> Inicia sesión para agregar</>

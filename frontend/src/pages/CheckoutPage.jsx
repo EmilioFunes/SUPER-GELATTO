@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useCart } from '../context/CartContext';
+import { useCart, formatPrice } from '../context/CartContext';
 import { CreditCard, Wallet, MapPin, CheckCircle, ArrowLeft, Loader2 } from 'lucide-react';
 import { Link, Navigate } from 'react-router-dom';
 import FlavorImage from '../components/FlavorImage';
@@ -134,7 +134,7 @@ const CheckoutPage = ({ user }) => {
                     <Loader2 className="animate-spin" /> Procesando...
                   </>
                 ) : (
-                  <>Confirmar Pedido (${totalPrice.toFixed(2)})</>
+                  <>Confirmar Pedido ({formatPrice(totalPrice)})</>
                 )}
               </button>
             </form>
@@ -156,8 +156,8 @@ const CheckoutPage = ({ user }) => {
                     <div className="flex-1 min-w-0">
                       <h4 className="text-sm font-bold text-white truncate">{item.nombre || item.name}</h4>
                       <div className="flex justify-between items-center mt-1">
-                        <span className="text-xs text-white/40">{item.quantity} x ${item.precio}</span>
-                        <span className="text-sm font-bold text-gold-premium">${(item.quantity * item.precio).toFixed(2)}</span>
+                        <span className="text-xs text-white/40">{item.quantity} x {formatPrice(item.precio || item.price)}</span>
+                        <span className="text-sm font-bold text-gold-premium">{formatPrice((item.quantity * (item.precio || item.price)))}</span>
                       </div>
                     </div>
                   </div>
@@ -167,7 +167,7 @@ const CheckoutPage = ({ user }) => {
               <div className="space-y-4 pt-6 border-t border-white/10">
                 <div className="flex justify-between text-sm">
                   <span className="text-white/40">Subtotal</span>
-                  <span>${totalPrice.toFixed(2)}</span>
+                  <span>{formatPrice(totalPrice)}</span>
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-white/40">Envío</span>
@@ -175,7 +175,7 @@ const CheckoutPage = ({ user }) => {
                 </div>
                 <div className="flex justify-between text-xl font-bold pt-4 border-t border-white/5">
                   <span>Total</span>
-                  <span className="text-gold-premium">${totalPrice.toFixed(2)}</span>
+                  <span className="text-gold-premium">{formatPrice(totalPrice)}</span>
                 </div>
               </div>
             </div>

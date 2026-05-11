@@ -15,7 +15,7 @@ Miguel Villa
 
 El proyecto está dividido en dos partes principales:
 
-- **`/frontend`**: Aplicación de cliente desarrollada en React (Vite), con animaciones avanzadas y una experiencia de usuario fluida.
+- **`/frontend`**: Aplicación de cliente desarrollada en React (Vite), con animaciones avanzadas y una experiencia de usuario fluida. [Ver detalles de activos y diseño](./frontend/README.md).
 - **`/backend`**: Servidor Node.js con Express, integrado con Supabase para la base de datos y autenticación, y servicios de envío de correos mediante SMTP.
 
 ---
