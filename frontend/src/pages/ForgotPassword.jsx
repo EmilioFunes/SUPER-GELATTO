@@ -10,6 +10,12 @@ function ForgotPassword() {
   const [previewUrl, setPreviewUrl] = useState('');
   const [sent, setSent] = useState(false);
 
+  const handleKeyDownNoSpaces = (e) => {
+    if (e.key === ' ' || e.keyCode === 32) {
+      e.preventDefault();
+    }
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
@@ -18,6 +24,22 @@ function ForgotPassword() {
 
     if (!email) {
       setError('Por favor ingresa tu correo electrónico.');
+      return;
+    }
+
+    const forbiddenRegex = /[<>&"'\/]/;
+    if (forbiddenRegex.test(email)) {
+      setError('No se permiten los caracteres: < > & " \' /');
+      return;
+    }
+
+    if (/\s/.test(email)) {
+      setError('El correo no puede tener espacios.');
+      return;
+    }
+
+    if (!/^[^\s@]+@[^\s@]+\.(com|net|edu)$/i.test(email)) {
+      setError('Email inválido (debe terminar en .com, .net o .edu).');
       return;
     }
 
@@ -57,7 +79,7 @@ function ForgotPassword() {
     <div className="login-page">
       {/* Full-screen background image */}
       <img
-        src="/images/Gemini_Generated_Image_qcbtmiqcbtmiqcbt.png"
+        src="/images/FONDO-LOGIN.png"
         alt="Helado artesanal"
         className="login-page__bg"
       />
@@ -70,7 +92,7 @@ function ForgotPassword() {
           <div className="login-brand">
             <div className="login-brand__logo-container">
               <img 
-                src="/images/logo.png" 
+                src="/images/LOGO-GELATTO.png" 
                 alt="super gelatto" 
                 className="login-brand__logo"
               />
@@ -93,14 +115,23 @@ function ForgotPassword() {
               <div className="login-form__field">
                 <span className="login-form__field-icon material-symbols-outlined">mail</span>
                 <input
-                  type="email"
-                  className="login-form__input"
+                  type="text"
+                  inputMode="email"
+                  className={`login-form__input ${error && (error.includes('correo') || error.includes('Email')) ? 'input-field-error' : ''}`}
                   placeholder="Correo electrónico"
                   value={email}
                   onChange={(e) => {
-                    setEmail(e.target.value);
-                    setError('');
+                    const val = e.target.value;
+                    setEmail(val);
+                    if (/\s/.test(val)) {
+                      setError('El correo no puede tener espacios.');
+                    } else if (val && !/^[^\s@]+@[^\s@]+\.(com|net|edu)$/i.test(val)) {
+                      setError('Email inválido (debe terminar en .com, .net o .edu).');
+                    } else {
+                      setError('');
+                    }
                   }}
+                  onKeyDown={handleKeyDownNoSpaces}
                   required
                 />
               </div>

@@ -6,10 +6,10 @@ import {
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useCart } from '../context/CartContext';
-import { FLAVORS } from '../data/flavors';
 import FlavorModal from '../components/FlavorModal';
 import FrameAnimation from '../components/FrameAnimation';
 import GelatoBuilder3D from '../components/GelatoBuilder3D';
+import { FLAVORS } from '../data/flavors';
 
 const storyParagraphs = [
   {
@@ -51,6 +51,10 @@ const Home = ({ user }) => {
   const [storyOpen, setStoryOpen] = useState(false);
   const { addToCart } = useCart();
   const navigate = useNavigate();
+
+  // Revertido a datos estáticos
+  const flavors = FLAVORS.slice(0, 6);
+  const loading = false;
 
   const handleQuickAdd = (flavor, e) => {
     e.stopPropagation(); // Evitar que se abra el modal al presionar el botón de añadir
@@ -146,7 +150,7 @@ const Home = ({ user }) => {
   ];
 
   // Show only first 6 flavors as featured
-  const featured = FLAVORS.slice(0, 6);
+  const featured = flavors;
 
   return (
     <div className="pt-[80px]">
@@ -320,9 +324,15 @@ const Home = ({ user }) => {
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
-            {featured.map((flavor, idx) => (
+            {loading ? (
+              // Loading Skeleton
+              [...Array(6)].map((_, i) => (
+                <div key={i} className="h-80 rounded-3xl bg-white/5 animate-pulse border border-white/10" />
+              ))
+            ) : (
+              featured.map((flavor, idx) => (
               <motion.div
-                key={flavor.id}
+                key={flavor.id || idx}
                 initial={{ opacity: 0, y: 30 }}
                 whileInView={{ opacity: 1, y: 0 }}
                 viewport={{ once: true }}
@@ -381,7 +391,7 @@ const Home = ({ user }) => {
                   </div>
                 </div>
               </motion.div>
-            ))}
+            )))}
           </div>
         </div>
       </section>
@@ -537,7 +547,7 @@ const Home = ({ user }) => {
             <div className="max-w-xs">
               <div className="flex items-center gap-2 mb-6">
                 <img 
-                  src="/images/Gemini_Generated_Image_eq9r4req9r4req9r (3).png" 
+                  src="/images/LOGO-GELATTO.png" 
                   alt="super gelatto" 
                   className="h-14 w-auto object-contain" 
                 />

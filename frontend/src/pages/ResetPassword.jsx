@@ -37,9 +37,48 @@ function ResetPassword() {
     validateToken();
   }, [token]);
 
+  const handleKeyDownNoSpaces = (e) => {
+    if (e.key === ' ' || e.keyCode === 32) {
+      e.preventDefault();
+    }
+  };
+
   const handleChange = (e) => {
-    setFormData({ ...formData, [e.target.name]: e.target.value });
-    setError('');
+    const { name, value } = e.target;
+    const updatedForm = { ...formData, [name]: value };
+    setFormData(updatedForm);
+    
+    // Real-time validation
+    let err = '';
+    const forbiddenRegex = /[<>&"'\/]/;
+    
+    if (forbiddenRegex.test(updatedForm.password) || forbiddenRegex.test(updatedForm.confirmPassword)) {
+      err = 'No se permiten los caracteres: < > & " \' /';
+    } else if (updatedForm.password) {
+      if (/\s/.test(updatedForm.password)) {
+        err = 'La contraseña no puede tener espacios.';
+      } else if (updatedForm.password.length < 8) {
+        err = 'La contraseña debe tener al menos 8 caracteres.';
+      } else if (!/[A-Z]/.test(updatedForm.password)) {
+        err = 'La contraseña debe incluir al menos una letra mayúscula.';
+      } else if (!/[a-z]/.test(updatedForm.password)) {
+        err = 'La contraseña debe incluir al menos una letra minúscula.';
+      } else if (!/[0-9]/.test(updatedForm.password)) {
+        err = 'La contraseña debe incluir al menos un número.';
+      } else if (!/[!@#$%^&*(),.?":{}|<>]/.test(updatedForm.password)) {
+        err = 'La contraseña debe incluir al menos un carácter especial.';
+      }
+    }
+    
+    if (!err && updatedForm.confirmPassword) {
+      if (/\s/.test(updatedForm.confirmPassword)) {
+        err = 'La contraseña no puede tener espacios.';
+      } else if (updatedForm.password !== updatedForm.confirmPassword) {
+        err = 'Las contraseñas no coinciden.';
+      }
+    }
+    
+    setError(err);
   };
 
   const handleSubmit = async (e) => {
@@ -52,8 +91,39 @@ function ResetPassword() {
       return;
     }
 
-    if (formData.password.length < 6) {
-      setError('La contraseña debe tener al menos 6 caracteres.');
+    const forbiddenRegex = /[<>&"'\/]/;
+    if (forbiddenRegex.test(formData.password) || forbiddenRegex.test(formData.confirmPassword)) {
+      setError('No se permiten los caracteres: < > & " \' /');
+      return;
+    }
+
+    if (formData.password.length < 8) {
+      setError('La contraseña debe tener al menos 8 caracteres.');
+      return;
+    }
+
+    if (!/[A-Z]/.test(formData.password)) {
+      setError('La contraseña debe incluir al menos una letra mayúscula.');
+      return;
+    }
+
+    if (!/[a-z]/.test(formData.password)) {
+      setError('La contraseña debe incluir al menos una letra minúscula.');
+      return;
+    }
+
+    if (!/[0-9]/.test(formData.password)) {
+      setError('La contraseña debe incluir al menos un número.');
+      return;
+    }
+
+    if (!/[!@#$%^&*(),.?":{}|<>]/.test(formData.password)) {
+      setError('La contraseña debe incluir al menos un carácter especial.');
+      return;
+    }
+
+    if (/\s/.test(formData.password)) {
+      setError('La contraseña no puede tener espacios.');
       return;
     }
 
@@ -97,7 +167,7 @@ function ResetPassword() {
     return (
       <div className="login-page">
         <img
-          src="/images/Gemini_Generated_Image_qcbtmiqcbtmiqcbt.png"
+          src="/images/FONDO-LOGIN.png"
           alt="Helado artesanal"
           className="login-page__bg"
         />
@@ -107,7 +177,7 @@ function ResetPassword() {
             <div className="login-brand">
               <div className="login-brand__logo-container">
                 <img 
-                  src="/images/logo.png" 
+                  src="/images/LOGO-GELATTO.png" 
                   alt="super gelatto" 
                   className="login-brand__logo"
                 />
@@ -126,7 +196,7 @@ function ResetPassword() {
     return (
       <div className="login-page">
         <img
-          src="/images/Gemini_Generated_Image_qcbtmiqcbtmiqcbt.png"
+          src="/images/FONDO-LOGIN.png"
           alt="Helado artesanal"
           className="login-page__bg"
         />
@@ -136,7 +206,7 @@ function ResetPassword() {
             <div className="login-brand">
               <div className="login-brand__logo-container">
                 <img 
-                  src="/images/logo.png" 
+                  src="/images/LOGO-GELATTO.png" 
                   alt="super gelatto" 
                   className="login-brand__logo"
                 />
@@ -170,7 +240,7 @@ function ResetPassword() {
   return (
     <div className="login-page">
       <img
-        src="/images/Gemini_Generated_Image_qcbtmiqcbtmiqcbt.png"
+        src="/images/FONDO-LOGIN.png"
         alt="Helado artesanal"
         className="login-page__bg"
       />
@@ -181,7 +251,7 @@ function ResetPassword() {
           <div className="login-brand">
             <div className="login-brand__logo-container">
               <img 
-                src="/images/logo.png" 
+                src="/images/LOGO-GELATTO.png" 
                 alt="super gelatto" 
                 className="login-brand__logo"
               />
@@ -207,10 +277,11 @@ function ResetPassword() {
                 <input
                   type="password"
                   name="password"
-                  className="login-form__input"
+                  className={`login-form__input ${error && (error.includes('La contraseña') || error.includes('caracteres')) ? 'input-field-error' : ''}`}
                   placeholder="Nueva contraseña"
                   value={formData.password}
                   onChange={handleChange}
+                  onKeyDown={handleKeyDownNoSpaces}
                   required
                 />
               </div>
@@ -220,10 +291,11 @@ function ResetPassword() {
                 <input
                   type="password"
                   name="confirmPassword"
-                  className="login-form__input"
+                  className={`login-form__input ${error && (error.includes('coinciden') || error.includes('espacios')) ? 'input-field-error' : ''}`}
                   placeholder="Confirmar contraseña"
                   value={formData.confirmPassword}
                   onChange={handleChange}
+                  onKeyDown={handleKeyDownNoSpaces}
                   required
                 />
               </div>

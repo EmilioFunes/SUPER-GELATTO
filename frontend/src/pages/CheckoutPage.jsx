@@ -9,6 +9,33 @@ const CheckoutPage = ({ user }) => {
   const { cart, totalPrice, clearCart } = useCart();
   const [isProcessing, setIsProcessing] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
+  const [formData, setFormData] = useState({
+    fullName: '',
+    phone: '',
+    address: '',
+    paymentMethod: 'nequi'
+  });
+  const [errors, setErrors] = useState({});
+
+  const validateField = (name, value) => {
+    let error = '';
+    if (name === 'fullName' && value.trim().length < 3) error = 'Nombre demasiado corto.';
+    if (name === 'phone' && !/^\+?[0-9\s-]{7,15}$/.test(value)) error = 'Teléfono inválido.';
+    if (name === 'address' && value.trim().length < 5) error = 'Dirección insuficiente.';
+    setErrors(prev => ({ ...prev, [name]: error }));
+  };
+
+  const handleChange = (e) => {
+    const { name, value } = e.target;
+    setFormData(prev => ({ ...prev, [name]: value }));
+    validateField(name, value);
+  };
+
+  const isFormValid = 
+    formData.fullName.trim().length >= 3 && 
+    /^\+?[0-9\s-]{7,15}$/.test(formData.phone) && 
+    formData.address.trim().length >= 5 &&
+    Object.values(errors).every(x => x === '');
 
   // SI NO ESTÁ REGISTRADO (no tiene ID de base de datos), LO MANDAMOS A REGISTRARSE
   if (!user?.id) {
@@ -25,6 +52,7 @@ const CheckoutPage = ({ user }) => {
         body: JSON.stringify({ 
           userId: user?.id, 
           total: totalPrice,
+          deliveryDetails: formData,
           items: cart.map(item => ({ 
             name: item.nombre || item.name, 
             quantity: item.quantity, 
@@ -87,17 +115,44 @@ const CheckoutPage = ({ user }) => {
                   <MapPin className="text-gold-premium" /> Información de Entrega
                 </h3>
                 <div className="grid md:grid-cols-2 gap-6">
-                  <div className="space-y-2">
+                  <div className="space-y-2 text-left">
                     <label className="text-xs font-bold text-white/40 uppercase">Nombre Completo</label>
-                    <input type="text" required placeholder="Ej. Juan Pérez" className="input-field" />
+                    <input 
+                      type="text" 
+                      name="fullName"
+                      required 
+                      placeholder="Ej. Juan Pérez" 
+                      className={`input-field ${errors.fullName ? 'input-field-error' : ''}`} 
+                      value={formData.fullName}
+                      onChange={handleChange}
+                    />
+                    {errors.fullName && <span className="field-error-msg">{errors.fullName}</span>}
                   </div>
-                  <div className="space-y-2">
+                  <div className="space-y-2 text-left">
                     <label className="text-xs font-bold text-white/40 uppercase">Teléfono</label>
-                    <input type="tel" required placeholder="+57 300 123 4567" className="input-field" />
+                    <input 
+                      type="tel" 
+                      name="phone"
+                      required 
+                      placeholder="+57 300 123 4567" 
+                      className={`input-field ${errors.phone ? 'input-field-error' : ''}`} 
+                      value={formData.phone}
+                      onChange={handleChange}
+                    />
+                    {errors.phone && <span className="field-error-msg">{errors.phone}</span>}
                   </div>
-                  <div className="md:col-span-2 space-y-2">
+                  <div className="md:col-span-2 space-y-2 text-left">
                     <label className="text-xs font-bold text-white/40 uppercase">Dirección de Entrega</label>
-                    <input type="text" required placeholder="Calle, Carrera, Apto, Barrio..." className="input-field" />
+                    <input 
+                      type="text" 
+                      name="address"
+                      required 
+                      placeholder="Calle, Carrera, Apto, Barrio..." 
+                      className={`input-field ${errors.address ? 'input-field-error' : ''}`} 
+                      value={formData.address}
+                      onChange={handleChange}
+                    />
+                    {errors.address && <span className="field-error-msg">{errors.address}</span>}
                   </div>
                 </div>
               </section>
@@ -114,7 +169,14 @@ const CheckoutPage = ({ user }) => {
                     { id: 'card', name: 'Tarjeta Crédito', logo: '💳' },
                   ].map((method) => (
                     <label key={method.id} className="cursor-pointer group">
-                      <input type="radio" name="payment" className="hidden peer" defaultChecked={method.id === 'nequi'} />
+                      <input 
+                        type="radio" 
+                        name="paymentMethod" 
+                        value={method.id}
+                        className="hidden peer" 
+                        checked={formData.paymentMethod === method.id}
+                        onChange={handleChange}
+                      />
                       <div className="p-6 border border-white/10 rounded-2xl bg-white/5 text-center transition-all peer-checked:border-gold-premium peer-checked:bg-gold-premium/10 group-hover:bg-white/10">
                         <div className="text-2xl mb-2">{method.logo}</div>
                         <div className="text-sm font-bold">{method.name}</div>
@@ -126,8 +188,8 @@ const CheckoutPage = ({ user }) => {
 
               <button 
                 type="submit"
-                disabled={isProcessing || cart.length === 0}
-                className="w-full py-5 rounded-full bg-gold-premium text-background-dark font-bold text-lg hover:scale-[1.02] transition-all disabled:opacity-50 flex items-center justify-center gap-3 shadow-lg shadow-gold-premium/20"
+                disabled={isProcessing || cart.length === 0 || !isFormValid}
+                className={`w-full py-5 rounded-full font-bold text-lg transition-all flex items-center justify-center gap-3 shadow-lg ${!isFormValid ? 'button-disabled' : 'bg-gold-premium text-background-dark hover:scale-[1.02] shadow-gold-premium/20'}`}
               >
                 {isProcessing ? (
                   <>

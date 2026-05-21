@@ -9,38 +9,99 @@ function Register() {
     password: '',
     confirmPassword: '',
   });
-  const [error, setError] = useState('');
+  const [errors, setErrors] = useState({});
   const [success, setSuccess] = useState('');
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
 
+  const handleKeyDownNoSpaces = (e) => {
+    if (e.key === ' ' || e.keyCode === 32) {
+      e.preventDefault();
+    }
+  };
+
+  const validateField = (name, value) => {
+    let error = '';
+    const forbiddenRegex = /[<>&"'\/]/;
+
+    if (forbiddenRegex.test(value)) {
+      error = 'No se permiten los caracteres: < > & " \' /';
+    } else {
+      if (name === 'name') {
+        if (!value.trim()) {
+          error = 'El nombre es obligatorio.';
+        } else if (/^\s/.test(value) || value !== value.trim()) {
+          error = 'No puede tener espacios al inicio ni al final.';
+        }
+      }
+      
+      if (name === 'email') {
+        if (/\s/.test(value)) {
+          error = 'El correo no puede tener espacios.';
+        } else if (!/^[^\s@]+@[^\s@]+\.(com|net|edu)$/i.test(value)) {
+          error = 'Email inválido (debe terminar en .com, .net o .edu).';
+        }
+      }
+      
+      if (name === 'password') {
+        if (/\s/.test(value)) {
+          error = 'La contraseña no puede tener espacios.';
+        } else if (value.length < 8) {
+          error = 'Mínimo 8 caracteres.';
+        } else if (!/[A-Z]/.test(value)) {
+          error = 'Falta una mayúscula.';
+        } else if (!/[a-z]/.test(value)) {
+          error = 'Falta una minúscula.';
+        } else if (!/[0-9]/.test(value)) {
+          error = 'Falta un número.';
+        } else if (!/[!@#$%^&*(),.?":{}|<>]/.test(value)) {
+          error = 'Falta un carácter especial.';
+        }
+      }
+      
+      if (name === 'confirmPassword') {
+        if (/\s/.test(value)) {
+          error = 'La contraseña no puede tener espacios.';
+        } else if (value !== formData.password) {
+          error = 'No coincide.';
+        }
+      }
+    }
+    
+    setErrors(prev => ({ ...prev, [name]: error }));
+  };
+
   const handleChange = (e) => {
-    setFormData({ ...formData, [e.target.name]: e.target.value });
-    setError('');
+    const { name, value } = e.target;
+    setFormData({ ...formData, [name]: value });
+    validateField(name, value);
     setSuccess('');
   };
 
+  const isFormValid = 
+    formData.name && 
+    formData.name === formData.name.trim() &&
+    formData.email && 
+    /^[^\s@]+@[^\s@]+\.(com|net|edu)$/i.test(formData.email) &&
+    !/\s/.test(formData.email) &&
+    !/[<>&"'\/]/.test(formData.email) &&
+    !/[<>&"'\/]/.test(formData.name) &&
+    !/[<>&"'\/]/.test(formData.password) &&
+    formData.password.length >= 8 && 
+    /[A-Z]/.test(formData.password) &&
+    /[a-z]/.test(formData.password) &&
+    /[0-9]/.test(formData.password) &&
+    /[!@#$%^&*(),.?":{}|<>]/.test(formData.password) &&
+    !/\s/.test(formData.password) &&
+    formData.password === formData.confirmPassword &&
+    Object.values(errors).every(x => x === '');
+
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setError('');
-    setSuccess('');
-
-    if (!formData.name || !formData.email || !formData.password || !formData.confirmPassword) {
-      setError('Todos los campos son obligatorios.');
-      return;
-    }
-
-    if (formData.password.length < 6) {
-      setError('La contraseña debe tener al menos 6 caracteres.');
-      return;
-    }
-
-    if (formData.password !== formData.confirmPassword) {
-      setError('Las contraseñas no coinciden.');
-      return;
-    }
+    if (!isFormValid) return;
 
     setLoading(true);
+    setErrors({});
 
     try {
       const res = await fetch('/api/register', {
@@ -52,7 +113,7 @@ function Register() {
       const data = await res.json();
 
       if (!res.ok) {
-        setError(data.message || 'Error al registrarse.');
+        setErrors({ server: data.message || 'Error al registrarse.' });
         setLoading(false);
         return;
       }
@@ -62,7 +123,7 @@ function Register() {
         navigate('/login');
       }, 2000);
     } catch (err) {
-      setError('Error de conexión con el servidor.');
+      setErrors({ server: 'Error de conexión con el servidor.' });
       setLoading(false);
     }
   };
@@ -71,7 +132,7 @@ function Register() {
     <div className="login-page">
       {/* Full-screen background image */}
       <img
-        src="/images/Gemini_Generated_Image_qcbtmiqcbtmiqcbt.png"
+        src="/images/FONDO-LOGIN.png"
         alt="Helado artesanal"
         className="login-page__bg"
       />
@@ -84,7 +145,7 @@ function Register() {
           <div className="login-brand">
             <div className="login-brand__logo-container">
               <img 
-                src="/images/Gemini_Generated_Image_eq9r4req9r4req9r (3).png" 
+                src="/images/LOGO-GELATTO.png" 
                 alt="super gelatto" 
                 className="login-brand__logo"
               />
@@ -93,7 +154,7 @@ function Register() {
             <p className="login-brand__subtitle">Crea tu cuenta y disfruta del sabor.</p>
           </div>
 
-          {error && <div className="login-error">{error}</div>}
+          {errors.server && <div className="login-error">{errors.server}</div>}
 
           {success && (
             <div className="login-success">{success}</div>
@@ -107,22 +168,28 @@ function Register() {
                 type="text"
                 name="name"
                 placeholder="Nombre completo"
-                className="login-form__input"
+                className={`login-form__input ${errors.name ? 'input-field-error' : ''}`}
+                required
                 value={formData.name}
                 onChange={handleChange}
               />
+              {errors.name && <span className="field-error-msg">{errors.name}</span>}
             </div>
 
             <div className="login-form__field">
               <span className="login-form__field-icon material-symbols-outlined">mail</span>
               <input
-                type="email"
+                type="text"
+                inputMode="email"
                 name="email"
                 placeholder="Correo electrónico"
-                className="login-form__input"
+                className={`login-form__input ${errors.email ? 'input-field-error' : ''}`}
+                required
                 value={formData.email}
                 onChange={handleChange}
+                onKeyDown={handleKeyDownNoSpaces}
               />
+              {errors.email && <span className="field-error-msg">{errors.email}</span>}
             </div>
 
             <div className="login-form__field">
@@ -130,11 +197,15 @@ function Register() {
               <input
                 type="password"
                 name="password"
-                placeholder="Contraseña (mín. 6 caracteres)"
-                className="login-form__input"
+                placeholder="Contraseña (mín. 8)"
+                className={`login-form__input ${errors.password ? 'input-field-error' : ''}`}
+                required
+                minLength="8"
                 value={formData.password}
                 onChange={handleChange}
+                onKeyDown={handleKeyDownNoSpaces}
               />
+              {errors.password && <span className="field-error-msg">{errors.password}</span>}
             </div>
 
             <div className="login-form__field">
@@ -143,16 +214,19 @@ function Register() {
                 type="password"
                 name="confirmPassword"
                 placeholder="Confirmar contraseña"
-                className="login-form__input"
+                className={`login-form__input ${errors.confirmPassword ? 'input-field-error' : ''}`}
+                required
                 value={formData.confirmPassword}
                 onChange={handleChange}
+                onKeyDown={handleKeyDownNoSpaces}
               />
+              {errors.confirmPassword && <span className="field-error-msg">{errors.confirmPassword}</span>}
             </div>
 
             <button
               type="submit"
-              className={`login-form__submit ${loading ? 'login-form__submit--loading' : ''}`}
-              disabled={loading}
+              className={`login-form__submit ${loading ? 'login-form__submit--loading' : ''} ${!isFormValid ? 'button-disabled' : ''}`}
+              disabled={loading || !isFormValid}
             >
               <span className="login-form__submit-shimmer"></span>
               {loading ? 'Registrando...' : 'Registrarse'}

@@ -18,6 +18,47 @@ const ProfilePage = ({ user, onUpdateUser }) => {
   const [editEmail, setEditEmail] = useState(user?.email || '');
   const [updating, setUpdating] = useState(false);
   const [status, setStatus] = useState({ type: null, message: '' });
+  const [errors, setErrors] = useState({});
+
+  const handleKeyDownNoSpaces = (e) => {
+    if (e.key === ' ' || e.keyCode === 32) {
+      e.preventDefault();
+    }
+  };
+
+  const validateField = (name, value) => {
+    let error = '';
+    const forbiddenRegex = /[<>&"'\/]/;
+
+    if (forbiddenRegex.test(value)) {
+      error = 'No se permiten los caracteres: < > & " \' /';
+    } else {
+      if (name === 'name') {
+        if (value.trim().length < 3) {
+          error = 'Nombre demasiado corto.';
+        } else if (/^\s/.test(value) || value !== value.trim()) {
+          error = 'No puede tener espacios al inicio ni al final.';
+        }
+      }
+      if (name === 'email') {
+        if (/\s/.test(value)) {
+          error = 'El correo no puede tener espacios.';
+        } else if (!/^[^\s@]+@[^\s@]+\.(com|net|edu)$/i.test(value)) {
+          error = 'Email inválido (debe terminar en .com, .net o .edu).';
+        }
+      }
+    }
+    setErrors(prev => ({ ...prev, [name]: error }));
+  };
+
+  const isFormValid = editName && 
+                      editName.trim().length >= 3 && 
+                      /^[^\s@]+@[^\s@]+\.(com|net|edu)$/i.test(editEmail) && 
+                      !/\s/.test(editEmail) &&
+                      !/[<>&"'\/]/.test(editEmail) &&
+                      !/[<>&"'\/]/.test(editName) &&
+                      !errors.name && 
+                      !errors.email;
 
   const superPoints = user?.points || 120;
   const nextTierPoints = 500;
@@ -125,33 +166,37 @@ const ProfilePage = ({ user, onUpdateUser }) => {
                 </div>
               ) : (
                 <form onSubmit={handleUpdateProfile} className="w-full space-y-4">
-                  <div className="space-y-1.5">
+                  <div className="space-y-1.5 text-left">
                     <label className="text-[10px] font-bold uppercase tracking-widest text-white/40 ml-1">Nombre</label>
                     <div className="relative">
                       <User size={14} className="absolute left-4 top-1/2 -translate-y-1/2 text-white/30" />
                       <input 
                         type="text" 
                         value={editName}
-                        onChange={(e) => setEditName(e.target.value)}
-                        className="w-full bg-white/5 border border-white/10 rounded-xl py-3 pl-10 pr-4 text-sm focus:border-gold-premium/50 focus:outline-none transition-all"
+                        onChange={(e) => { setEditName(e.target.value); validateField('name', e.target.value); }}
+                        className={`w-full bg-white/5 border border-white/10 rounded-xl py-3 pl-10 pr-4 text-sm focus:border-gold-premium/50 focus:outline-none transition-all ${errors.name ? 'input-field-error' : ''}`}
                         placeholder="Tu nombre"
                         required
                       />
                     </div>
+                    {errors.name && <span className="field-error-msg">{errors.name}</span>}
                   </div>
-                  <div className="space-y-1.5">
+                  <div className="space-y-1.5 text-left">
                     <label className="text-[10px] font-bold uppercase tracking-widest text-white/40 ml-1">Email</label>
                     <div className="relative">
                       <Mail size={14} className="absolute left-4 top-1/2 -translate-y-1/2 text-white/30" />
                       <input 
-                        type="email" 
+                        type="text" 
+                        inputMode="email"
                         value={editEmail}
-                        onChange={(e) => setEditEmail(e.target.value)}
-                        className="w-full bg-white/5 border border-white/10 rounded-xl py-3 pl-10 pr-4 text-sm focus:border-gold-premium/50 focus:outline-none transition-all"
+                        onChange={(e) => { setEditEmail(e.target.value); validateField('email', e.target.value); }}
+                        className={`w-full bg-white/5 border border-white/10 rounded-xl py-3 pl-10 pr-4 text-sm focus:border-gold-premium/50 focus:outline-none transition-all ${errors.email ? 'input-field-error' : ''}`}
                         placeholder="tu@email.com"
+                        onKeyDown={handleKeyDownNoSpaces}
                         required
                       />
                     </div>
+                    {errors.email && <span className="field-error-msg">{errors.email}</span>}
                   </div>
 
                   <div className="flex gap-3 pt-2">
@@ -164,8 +209,8 @@ const ProfilePage = ({ user, onUpdateUser }) => {
                     </button>
                     <button 
                       type="submit"
-                      disabled={updating}
-                      className="flex-1 flex items-center justify-center gap-2 py-3 bg-gold-premium text-background-dark rounded-xl text-xs font-bold uppercase tracking-widest transition-all hover:scale-[1.02] disabled:opacity-50"
+                      disabled={updating || !isFormValid}
+                      className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-xs font-bold uppercase tracking-widest transition-all ${!isFormValid ? 'button-disabled' : 'bg-gold-premium text-background-dark hover:scale-[1.02]'}`}
                     >
                       {updating ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />} 
                       {updating ? 'Guardando' : 'Guardar'}

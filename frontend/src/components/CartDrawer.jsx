@@ -43,8 +43,8 @@ const CartDrawer = ({ isOpen, onClose }) => {
                 </Link>
               </div>
             ) : (
-              cart.map((item) => (
-                <div key={item.id} className="flex gap-3 group">
+              cart.map((item, index) => (
+                <div key={item.id || `item-${index}`} className="flex gap-3 group">
                   <div className="w-16 h-16 rounded-xl bg-white/5 flex-shrink-0 flex items-center justify-center overflow-hidden border border-white/5 group-hover:border-gold-premium/30 transition-all duration-500">
                     <FlavorImage flavor={item} className="w-full h-full text-xl" />
                   </div>

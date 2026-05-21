@@ -9,6 +9,7 @@ import Home from './pages/Home';
 import ProductsPage from './pages/ProductsPage';
 import ProfilePage from './pages/ProfilePage';
 import CheckoutPage from './pages/CheckoutPage';
+import AdminDashboard from './pages/AdminDashboard';
 import Navbar from './components/Navbar';
 import Gelbot from './components/Gelbot';
 import './index.css';
@@ -20,7 +21,7 @@ const ProtectedRoute = ({ children, user, onLogout }) => {
     <>
       <Navbar user={user} onLogout={onLogout} />
       {children}
-      <Gelbot />
+      <Gelbot user={user} />
     </>
   );
 };
@@ -103,6 +104,14 @@ function App() {
             element={
               <ProtectedRoute user={user} onLogout={handleLogout}>
                 <CheckoutPage user={user} />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/admin"
+            element={
+              <ProtectedRoute user={user} onLogout={handleLogout}>
+                <AdminDashboard user={user} />
               </ProtectedRoute>
             }
           />

@@ -5,14 +5,55 @@ import '../styles/Auth.css';
 
 function Login({ onLogin }) {
   const [formData, setFormData] = useState({ email: '', password: '' });
-  const [error, setError] = useState('');
+  const [errors, setErrors] = useState({});
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
 
-  const handleChange = (e) => {
-    setFormData({ ...formData, [e.target.name]: e.target.value });
-    setError('');
+  const handleKeyDownNoSpaces = (e) => {
+    if (e.key === ' ' || e.keyCode === 32) {
+      e.preventDefault();
+    }
   };
+
+  const validateField = (name, value) => {
+    let error = '';
+    const forbiddenRegex = /[<>&"'\/]/;
+
+    if (forbiddenRegex.test(value)) {
+      error = 'No se permiten los caracteres: < > & " \' /';
+    } else {
+      if (name === 'email') {
+        if (/\s/.test(value)) {
+          error = 'El correo no puede tener espacios.';
+        } else if (!/^[^\s@]+@[^\s@]+\.(com|net|edu)$/i.test(value)) {
+          error = 'Email inválido (debe terminar en .com, .net o .edu).';
+        }
+      }
+      if (name === 'password') {
+        if (/\s/.test(value)) {
+          error = 'La contraseña no puede tener espacios.';
+        } else if (!value) {
+          error = 'La contraseña es obligatoria.';
+        }
+      }
+    }
+    setErrors(prev => ({ ...prev, [name]: error }));
+  };
+
+  const handleChange = (e) => {
+    const { name, value } = e.target;
+    setFormData({ ...formData, [name]: value });
+    validateField(name, value);
+  };
+
+  const isFormValid = formData.email && 
+                     formData.password && 
+                     /^[^\s@]+@[^\s@]+\.(com|net|edu)$/i.test(formData.email) &&
+                     !/\s/.test(formData.email) &&
+                     !/\s/.test(formData.password) &&
+                     !/[<>&"'\/]/.test(formData.email) &&
+                     !/[<>&"'\/]/.test(formData.password) &&
+                     Object.values(errors).every(x => x === '');
 
   const handleGoogleSuccess = async (credentialResponse) => {
     setLoading(true);
@@ -28,71 +69,37 @@ function Login({ onLogin }) {
       const name = payload.name || payload.given_name || 'Usuario de Google';
       const picture = payload.picture;
 
-      // CLAVE INTERNA PARA USUARIOS DE GOOGLE (para el backend que no podemos tocar)
-      const GOOGLE_SECRET_PWD = `GOOGLE_USER_${email}_SECURE_KEY`;
-
-      // 1. Intentar iniciar sesión (por si ya tiene cuenta de Google vinculada)
-      const loginRes = await fetch('/api/login', {
+      // Usar el nuevo endpoint dedicado de Google Login
+      const loginRes = await fetch('/api/google-login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password: GOOGLE_SECRET_PWD }),
+        body: JSON.stringify({ email, name }),
       });
+
+      const data = await loginRes.json();
 
       if (loginRes.ok) {
-        const loginData = await loginRes.json();
-        onLogin({ ...loginData.user, picture });
-        navigate('/');
-        return;
-      }
-
-      // 2. Si no tiene cuenta, registrarlo automáticamente
-      const registerRes = await fetch('/api/register', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          name, 
-          email, 
-          password: GOOGLE_SECRET_PWD, 
-          confirmPassword: GOOGLE_SECRET_PWD 
-        }),
-      });
-
-      if (registerRes.ok) {
-        // Logear ahora que ya existe
-        const finalLoginRes = await fetch('/api/login', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email, password: GOOGLE_SECRET_PWD }),
-        });
-        const finalData = await finalLoginRes.json();
-        onLogin({ ...finalData.user, picture });
+        onLogin({ ...data.user, picture });
         navigate('/');
       } else {
-        const errorData = await registerRes.json();
-        // Si el email ya existe con OTRA contraseña (registro manual previo)
-        if (registerRes.status === 409) {
-          setError('Este email ya está registrado con una contraseña manual. Por favor, entra con tu correo y contraseña.');
-        } else {
-          setError('Error al vincular tu cuenta de Google.');
-        }
+        setErrors({ server: data.message || 'Error al vincular tu cuenta de Google.' });
         setLoading(false);
       }
     } catch (e) {
       console.error('Error in Google Auth flow', e);
-      setError('Error de conexión al procesar Google login.');
+      setErrors({ server: 'Error de conexión al procesar Google login.' });
       setLoading(false);
     }
   };
 
   const handleGoogleError = () => {
-    setError('Error al iniciar sesión con Google.');
+    setErrors({ server: 'Error al iniciar sesión con Google.' });
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setError('');
+    if (!isFormValid) return;
     setLoading(true);
-
     try {
       const res = await fetch('/api/login', {
         method: 'POST',
@@ -102,7 +109,7 @@ function Login({ onLogin }) {
 
       const data = await res.json();
       if (!res.ok) {
-        setError(data.message || 'Error al iniciar sesión.');
+        setErrors({ server: data.message || 'Error al iniciar sesión.' });
         setLoading(false);
         return;
       }
@@ -110,7 +117,7 @@ function Login({ onLogin }) {
       onLogin(data.user);
       navigate('/');
     } catch (err) {
-      setError('Error de conexión con el servidor.');
+      setErrors({ server: 'Error de conexión con el servidor.' });
       setLoading(false);
     }
   };
@@ -119,7 +126,7 @@ function Login({ onLogin }) {
     <div className="login-page">
       {/* Full-screen background image */}
       <img
-        src="/images/Gemini_Generated_Image_qcbtmiqcbtmiqcbt.png"
+        src="/images/FONDO-LOGIN.png"
         alt="Helado artesanal"
         className="login-page__bg"
       />
@@ -132,7 +139,7 @@ function Login({ onLogin }) {
           <div className="login-brand">
             <div className="login-brand__logo-container">
               <img 
-                src="/images/Gemini_Generated_Image_eq9r4req9r4req9r (3).png" 
+                src="/images/LOGO-GELATTO.png" 
                 alt="super gelatto" 
                 className="login-brand__logo"
               />
@@ -141,20 +148,23 @@ function Login({ onLogin }) {
             <p className="login-brand__subtitle">Ingresa a tu taller del sabor.</p>
           </div>
 
-          {error && <div className="login-error">{error}</div>}
+          {errors.server && <div className="login-error">{errors.server}</div>}
 
-          {/* Form */}
           <form onSubmit={handleSubmit} className="login-form">
             <div className="login-form__field">
               <span className="login-form__field-icon material-symbols-outlined">mail</span>
               <input
-                type="email"
+                type="text"
+                inputMode="email"
                 name="email"
                 placeholder="Correo electrónico"
-                className="login-form__input"
+                className={`login-form__input ${errors.email ? 'input-field-error' : ''}`}
+                required
                 value={formData.email}
                 onChange={handleChange}
+                onKeyDown={handleKeyDownNoSpaces}
               />
+              {errors.email && <span className="field-error-msg">{errors.email}</span>}
             </div>
 
             <div className="login-form__field">
@@ -162,11 +172,14 @@ function Login({ onLogin }) {
               <input
                 type="password"
                 name="password"
-                placeholder="Contraseña (mín. 6 caracteres)"
-                className="login-form__input"
+                placeholder="Contraseña"
+                className={`login-form__input ${errors.password ? 'input-field-error' : ''}`}
+                required
                 value={formData.password}
                 onChange={handleChange}
+                onKeyDown={handleKeyDownNoSpaces}
               />
+              {errors.password && <span className="field-error-msg">{errors.password}</span>}
             </div>
 
             <div className="login-form__forgot">
@@ -177,8 +190,8 @@ function Login({ onLogin }) {
 
             <button
               type="submit"
-              className={`login-form__submit ${loading ? 'login-form__submit--loading' : ''}`}
-              disabled={loading}
+              className={`login-form__submit ${loading ? 'login-form__submit--loading' : ''} ${!isFormValid ? 'button-disabled' : ''}`}
+              disabled={loading || !isFormValid}
             >
               <span className="login-form__submit-shimmer"></span>
               {loading ? 'Cargando...' : 'Entrar'}

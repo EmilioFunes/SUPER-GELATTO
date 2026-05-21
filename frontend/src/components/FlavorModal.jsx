@@ -49,7 +49,7 @@ const FlavorModal = ({ flavor, onClose, user }) => {
             <div
               className="pointer-events-auto relative w-full max-w-4xl max-h-[90vh] overflow-y-auto rounded-3xl border border-white/10 shadow-2xl"
               style={{
-                background: `radial-gradient(circle at top left, ${flavor.glowModal} 0%, #0d0a1a 60%)`,
+                background: `radial-gradient(circle at top left, ${flavor.glowModal || 'rgba(212,175,55,0.15)'} 0%, #0d0a1a 60%)`,
                 backdropFilter: 'blur(20px)',
               }}
             >
@@ -70,7 +70,7 @@ const FlavorModal = ({ flavor, onClose, user }) => {
                     {flavor.badge}
                   </span>
                   <div className="absolute bottom-5 left-5 flex items-center gap-2 bg-black/40 backdrop-blur-sm px-3 py-1.5 rounded-full border border-white/10">
-                    <span className="text-xs text-white/70">📍 {flavor.origin}</span>
+                    <span className="text-xs text-white/70">📍 {flavor.origin || 'Colombia'}</span>
                   </div>
                 </div>
 
@@ -88,29 +88,27 @@ const FlavorModal = ({ flavor, onClose, user }) => {
                           <Star key={s} size={14} className="fill-gold-premium text-gold-premium" />
                         ))}
                       </div>
-                      <span className="text-sm font-bold text-white">{flavor.rating}</span>
-                      <span className="text-xs text-white/40">({flavor.reviews} reseñas)</span>
+                      <span className="text-sm font-bold text-white">{flavor.rating || 4.8}</span>
+                      <span className="text-xs text-white/40">({flavor.reviews || 0} reseñas)</span>
                     </div>
-                    <p className="text-sm text-white/60 leading-relaxed">{flavor.longDesc}</p>
+                    <p className="text-sm text-white/60 leading-relaxed">{flavor.longDesc || flavor.desc}</p>
                   </div>
 
-                  {/* Tags */}
                   <div className="flex flex-wrap gap-2">
-                    {flavor.tags.map(tag => (
+                    {(flavor.tags || []).map(tag => (
                       <span key={tag} className="text-[10px] font-bold uppercase tracking-widest px-2.5 py-1 rounded-full bg-white/5 border border-white/10 text-white/60">
                         {tag}
                       </span>
                     ))}
                     <span className="text-[10px] font-bold uppercase tracking-widest px-2.5 py-1 rounded-full bg-white/5 border border-white/10 text-white/60 flex items-center gap-1">
-                      <Clock size={10} /> {flavor.prepTime}
+                      <Clock size={10} /> {flavor.prepTime || '48h'}
                     </span>
                   </div>
 
-                  {/* Flavor Profile */}
                   <div>
                     <h4 className="text-xs font-bold uppercase tracking-widest text-white/40 mb-3">Perfil de Sabor</h4>
                     <div className="space-y-2.5">
-                      {flavor.flavorProfile.map(f => (
+                      {(flavor.flavorProfile || []).map(f => (
                         <div key={f.label}>
                           <div className="flex justify-between text-xs mb-1">
                             <span className="text-white/70 font-medium">{f.label}</span>
@@ -130,17 +128,16 @@ const FlavorModal = ({ flavor, onClose, user }) => {
                     </div>
                   </div>
 
-                  {/* Nutrition */}
                   <div>
                     <h4 className="text-xs font-bold uppercase tracking-widest text-white/40 mb-3">
                       Información Nutricional <span className="normal-case font-normal">(por 100g)</span>
                     </h4>
                     <div className="grid grid-cols-4 gap-2">
                       {[
-                        { icon: <Flame size={14} />, label: 'Calorías', value: flavor.nutrition.calorias, unit: 'kcal' },
-                        { icon: <Droplets size={14} />, label: 'Grasas', value: flavor.nutrition.grasas, unit: 'g' },
-                        { icon: <Zap size={14} />, label: 'Carbos', value: flavor.nutrition.carbos, unit: 'g' },
-                        { icon: <Award size={14} />, label: 'Proteína', value: flavor.nutrition.proteinas, unit: 'g' },
+                        { icon: <Flame size={14} />, label: 'Calorías', value: flavor.nutrition?.calorias || 0, unit: 'kcal' },
+                        { icon: <Droplets size={14} />, label: 'Grasas', value: flavor.nutrition?.grasas || 0, unit: 'g' },
+                        { icon: <Zap size={14} />, label: 'Carbos', value: flavor.nutrition?.carbos || 0, unit: 'g' },
+                        { icon: <Award size={14} />, label: 'Proteína', value: flavor.nutrition?.proteinas || 0, unit: 'g' },
                       ].map(n => (
                         <div key={n.label} className="bg-white/5 border border-white/8 rounded-2xl p-3 text-center">
                           <div className="flex justify-center mb-1" style={{ color: flavor.accentColor }}>{n.icon}</div>
@@ -153,12 +150,11 @@ const FlavorModal = ({ flavor, onClose, user }) => {
                     </div>
                   </div>
 
-                  {/* Ingredients & Allergens */}
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <h4 className="text-xs font-bold uppercase tracking-widest text-white/40 mb-2">Ingredientes</h4>
                       <ul className="space-y-1">
-                        {flavor.ingredients.map(ing => (
+                        {(flavor.ingredients || []).map(ing => (
                           <li key={ing} className="text-xs text-white/60 flex items-center gap-1.5">
                             <span className="w-1 h-1 rounded-full bg-white/30 flex-shrink-0" />
                             {ing}
@@ -169,13 +165,13 @@ const FlavorModal = ({ flavor, onClose, user }) => {
                     <div>
                       <h4 className="text-xs font-bold uppercase tracking-widest text-white/40 mb-2">Alérgenos</h4>
                       <div className="flex flex-wrap gap-1.5">
-                        {flavor.allergens.map(a => (
+                        {(flavor.allergens || []).map(a => (
                           <span key={a} className="text-[10px] font-bold px-2 py-1 rounded-lg bg-red-500/10 border border-red-500/20 text-red-300">
                             ⚠ {a}
                           </span>
                         ))}
                       </div>
-                      {flavor.tags.includes('Vegano') && (
+                      {flavor.tags?.includes('Vegano') && (
                         <div className="mt-2 flex items-center gap-1.5 text-green-400 text-xs font-bold">
                           <Leaf size={12} /> 100% Vegano
                         </div>

@@ -3,8 +3,8 @@ import { motion } from 'framer-motion';
 import { Search, Star, SlidersHorizontal, ShoppingCart } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useCart } from '../context/CartContext';
-import { FLAVORS } from '../data/flavors';
 import FlavorModal from '../components/FlavorModal';
+import { FLAVORS } from '../data/flavors';
 
 const CATEGORIES = ['Todos', 'Clásico', 'Vegano', 'Temporada'];
 
@@ -16,20 +16,39 @@ const ProductsPage = ({ user }) => {
   const { addToCart } = useCart();
   const navigate = useNavigate();
 
+  const [flavors, setFlavors] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  React.useEffect(() => {
+    const fetchProducts = async () => {
+      try {
+        const res = await fetch('/api/products');
+        if (!res.ok) throw new Error('Error al conectar con la heladería');
+        const data = await res.json();
+        setFlavors(data);
+      } catch (err) {
+        setError(err.message);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchProducts();
+  }, []);
+
   const handleQuickAdd = (flavor, e) => {
-    e.stopPropagation(); // Evitar que se abra el modal al presionar el botón de añadir
+    e.stopPropagation();
     if (!user?.id) {
       alert('¡Vaya! Necesitas una cuenta registrada para realizar pedidos. Te llevamos al registro 🍦');
       navigate('/register');
       return;
     }
-    // Asegurarnos de pasar los campos correctos (nombre, precio, imagen)
     addToCart({ ...flavor, precio: flavor.price }, 1);
     alert(`¡${flavor.name} añadido al carrito! 🍦`);
   };
 
   const filtered = useMemo(() => {
-    let list = [...FLAVORS];
+    let list = [...flavors];
 
     if (searchTerm.trim()) {
       const q = searchTerm.toLowerCase();
@@ -50,7 +69,7 @@ const ProductsPage = ({ user }) => {
     if (sortBy === 'reviews') list.sort((a, b) => b.reviews - a.reviews);
 
     return list;
-  }, [searchTerm, selectedCategory, sortBy]);
+  }, [flavors, searchTerm, selectedCategory, sortBy]);
 
   return (
     <div className="pt-[80px] pb-24 px-6 min-h-screen">
@@ -74,7 +93,7 @@ const ProductsPage = ({ user }) => {
               </span>
             </h1>
             <p className="text-white/50 max-w-xl">
-              {FLAVORS.length} creaciones artesanales. Toca cualquier sabor para descubrir sus especificaciones completas.
+              {flavors.length} creaciones artesanales. Toca cualquier sabor para descubrir sus especificaciones completas.
             </p>
           </motion.div>
         </div>
@@ -140,8 +159,30 @@ const ProductsPage = ({ user }) => {
           </div>
         </motion.div>
 
+        {/* ─── Loading / Error ──────────────────────── */}
+        {loading && (
+          <div className="flex flex-col items-center justify-center py-40 gap-4">
+            <div className="flex gap-2">
+              <span className="w-3 h-3 bg-gold-premium rounded-full animate-bounce" style={{ animationDelay: '0s' }} />
+              <span className="w-3 h-3 bg-gold-premium rounded-full animate-bounce" style={{ animationDelay: '0.15s' }} />
+              <span className="w-3 h-3 bg-gold-premium rounded-full animate-bounce" style={{ animationDelay: '0.3s' }} />
+            </div>
+            <p className="text-white/40 text-sm">Cargando sabores desde la base de datos…</p>
+          </div>
+        )}
+        {error && !loading && (
+          <div className="flex flex-col items-center justify-center py-40 text-center">
+            <div className="text-5xl mb-4">😕</div>
+            <h3 className="text-xl font-bold text-white mb-2">Error al cargar</h3>
+            <p className="text-white/40 text-sm">{error}</p>
+            <button onClick={() => window.location.reload()} className="mt-6 text-gold-premium font-bold hover:underline">
+              Reintentar
+            </button>
+          </div>
+        )}
+
         {/* ─── Grid ─────────────────────────────────── */}
-        {filtered.length === 0 ? (
+        {!loading && !error && (filtered.length === 0 ? (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -161,7 +202,7 @@ const ProductsPage = ({ user }) => {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
             {filtered.map((flavor, idx) => (
               <motion.div
-                key={flavor.id}
+                key={flavor.id ?? idx}
                 layout
                 initial={{ opacity: 0, y: 30 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -231,7 +272,7 @@ const ProductsPage = ({ user }) => {
               </motion.div>
             ))}
           </div>
-        )}
+        ))}
       </div>
     </div>
   );

@@ -25,6 +25,10 @@ const Navbar = ({ user, onLogout }) => {
     { name: 'Perfil', path: '/perfil' },
   ];
 
+  if (user?.rol === 'admin') {
+    navLinks.push({ name: 'Admin', path: '/admin' });
+  }
+
   const scrollToBuilder = () => {
     setIsMobileMenuOpen(false);
     const el = document.getElementById('gelato-builder-360');
@@ -57,7 +61,7 @@ const Navbar = ({ user, onLogout }) => {
           <div className="flex-1 flex justify-start">
             <Link to="/" className="flex items-center group relative">
               <img 
-                src="/images/Gemini_Generated_Image_eq9r4req9r4req9r (3).png" 
+                src="/images/LOGO-GELATTO.png" 
                 alt="super gelatto" 
                 className="navbar-logo-pop" 
               />
@@ -140,7 +144,9 @@ const Navbar = ({ user, onLogout }) => {
                   <span className="text-sm font-bold text-white/90 group-hover:text-gold-premium transition-colors leading-none">
                     {user?.name?.split(' ')[0] || 'Gourmet'}
                   </span>
-                  <span className="text-[10px] text-white/40 font-medium uppercase tracking-widest mt-1">Miembro</span>
+                  <span className="text-[10px] text-white/40 font-medium uppercase tracking-widest mt-1">
+                    {user?.rol === 'admin' ? 'Admin' : 'Miembro'}
+                  </span>
                 </div>
               </Link>
               <button 
