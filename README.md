@@ -1,7 +1,7 @@
 # 🍦 Super Gelatto
 
 
-integrantes:
+Integrantes:
 Cristian Munera
 Jaider Funes
 Breidis Tabares
@@ -35,8 +35,8 @@ Sigue estos pasos para poner en marcha el proyecto localmente:
 
 ### 1. Clonar el repositorio
 ```bash
-git clone https://github.com/tu-usuario/gelatto-2-0.git
-cd gelatto-2-0
+git clone https://github.com/EmilioFunes/SUPER-GELATTO.git
+cd SUPER-GELATTO
 ```
 
 ### 2. Configurar el Backend
