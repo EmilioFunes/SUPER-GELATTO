@@ -73,7 +73,7 @@ const tools = [
     type: "function",
     function: {
       name: "deleteProduct",
-      description: "SOLO ADMIN: Elimina un producto del catálogo por su ID numérico.",
+      description: "SOLO ADMIN: Elimina un producto del catálogo por su numero de ID.",
       parameters: {
         type: "object",
         properties: {
