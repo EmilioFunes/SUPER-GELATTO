@@ -1,5 +1,6 @@
 # 🍦 Super Gelatto
 
+¡Bienvenido a **Super Gelatto**! Esta es una aplicación web moderna y completa para una heladería artesanal, que incluye una interfaz de usuario premium, un sistema de puntos de lealtad, autenticación y un constructor de helados interactivo en 3D.
 
 Integrantes:
 Cristian Munera
@@ -7,9 +8,6 @@ Jaider Funes
 Breidis Tabares
 Miguel Villa
 
-
-
-¡Bienvenido a **Super Gelatto**! Esta es una aplicación web moderna y completa para una heladería artesanal, que incluye una interfaz de usuario premium, un sistema de puntos de lealtad, autenticación y un constructor de helados interactivo en 3D.
 
 ## 🚀 Estructura del Proyecto
 
