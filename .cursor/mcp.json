@@ -5,7 +5,7 @@
       "args": [
         "C:\\Users\\paleg\\AppData\\Roaming\\npm\\node_modules\\@supabase\\mcp-server-supabase\\dist\\transports\\stdio.js",
         "--access-token",
-        "sbp_TOKEN_REMOVED_REMOVED",
+        "sbp_TOKEN_REMOVED",
         "--project-ref",
         "gphzhnuueefghrcexros"
       ]

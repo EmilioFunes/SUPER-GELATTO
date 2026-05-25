@@ -3,6 +3,55 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { X, Send } from 'lucide-react';
 import { useCart } from '../context/CartContext';
 
+const parseInlineStyles = (text) => {
+  if (typeof text !== 'string') return text;
+  const parts = text.split(/(\*\*.*?\*\*)/g);
+  return parts.map((part, i) => {
+    if (part.startsWith('**') && part.endsWith('**')) {
+      return <strong key={i} className="text-gold-premium font-semibold">{part.slice(2, -2)}</strong>;
+    }
+    return part;
+  });
+};
+
+const renderMessageText = (text) => {
+  if (!text) return null;
+  const lines = text.split('\n');
+  return lines.map((line, idx) => {
+    const trimmed = line.trim();
+    if (!trimmed) return <div key={idx} className="h-1" />;
+    
+    // Check for bullet list
+    const isBullet = trimmed.startsWith('•') || trimmed.startsWith('-') || trimmed.startsWith('*');
+    if (isBullet) {
+      const cleanLine = trimmed.replace(/^[•\-\*]\s*/, '');
+      return (
+        <div key={idx} className="flex gap-2 ml-2 my-1 items-start text-white/95">
+          <span className="text-gold-premium mt-1.5 w-1.5 h-1.5 rounded-full bg-gold-premium flex-shrink-0" />
+          <span>{parseInlineStyles(cleanLine)}</span>
+        </div>
+      );
+    }
+    
+    // Check for section headers (e.g. ══ ROLES ══ or ### Header)
+    const isHeader = trimmed.startsWith('###') || trimmed.startsWith('==') || trimmed.startsWith('══');
+    if (isHeader) {
+      const cleanHeader = trimmed.replace(/[#=═]/g, '').trim();
+      return (
+        <h5 key={idx} className="text-xs font-bold text-gold-premium uppercase tracking-wider mt-3 mb-1">
+          {cleanHeader}
+        </h5>
+      );
+    }
+    
+    return (
+      <p key={idx} className="my-0.5 leading-relaxed text-white/90">
+        {parseInlineStyles(line)}
+      </p>
+    );
+  });
+};
+
 const Gelbot = ({ user }) => {
   const { addToCart } = useCart();
   const [isOpen, setIsOpen] = useState(false);
@@ -10,8 +59,8 @@ const Gelbot = ({ user }) => {
   const welcomeMsg = (u) => ({
     id: 1,
     text: u?.rol === 'admin'
-      ? `¡Hola Admin ${u?.nombre || ''}! Soy Gelbot 🍦 ¿En qué puedo ayudarte hoy a gestionar la tienda?`
-      : `¡Hola ${u?.nombre || 'Gelattista'}! Soy Gelbot 🍦 ¿En qué puedo ayudarte hoy?`,
+      ? `¡Hola Admin ${u?.name || u?.nombre || ''}! Soy Gelbot 🍦 ¿En qué puedo ayudarte hoy a gestionar la tienda?`
+      : `¡Hola ${u?.name || u?.nombre || 'Gelattista'}! Soy Gelbot 🍦 ¿En qué puedo ayudarte hoy?`,
     sender: 'bot'
   });
 
@@ -41,6 +90,8 @@ const Gelbot = ({ user }) => {
         body: JSON.stringify({
           message: input,
           userId:  user?.id,
+          userName: user?.name,
+          userRole: user?.rol,
           history: chatHistory
         })
       });
@@ -132,7 +183,7 @@ const Gelbot = ({ user }) => {
                       ? 'bg-gold-premium text-background-dark font-medium rounded-tr-none'
                       : 'bg-white/5 border border-white/10 text-white rounded-tl-none'
                   }`}>
-                    {msg.text}
+                    {msg.sender === 'user' ? msg.text : renderMessageText(msg.text)}
                   </div>
 
                   {/* ── Tabla de Usuarios (Admin) ── */}
@@ -209,6 +260,63 @@ const Gelbot = ({ user }) => {
                                     month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
                                   })}
                                 </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* ── Tabla Dinámica (Admin) ── */}
+                  {msg.action === 'showTable' && Array.isArray(msg.actionData) && msg.actionData.length > 0 && (
+                    <div className="w-[95%] bg-black/60 border border-white/20 rounded-xl overflow-hidden mt-1 text-[11px] shadow-lg shadow-black/50">
+                      <div className="p-2 bg-white/5 border-b border-white/10 flex justify-between items-center">
+                        <span className="font-bold text-gold-premium uppercase tracking-wider text-[10px]">📊 Consulta Base de Datos</span>
+                        <span className="text-white/50 text-[10px]">{msg.actionData.length} filas</span>
+                      </div>
+                      <div className="max-h-[220px] overflow-x-auto overflow-y-auto">
+                        <table className="w-full text-left border-collapse min-w-[320px]">
+                          <thead className="bg-white/10 text-white/80 sticky top-0">
+                            <tr>
+                              {Object.keys(msg.actionData[0]).map((header) => (
+                                <th key={header} className="p-2 font-semibold capitalize border-b border-white/10 text-[9px] tracking-wider uppercase">
+                                  {header.replace(/_/g, ' ')}
+                                </th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {msg.actionData.map((row, idx) => (
+                              <tr key={idx} className="border-t border-white/5 hover:bg-white/5 transition-colors">
+                                {Object.values(row).map((val, cellIdx) => {
+                                  let displayVal = val;
+                                  if (typeof val === 'boolean') {
+                                    displayVal = val ? 'Sí' : 'No';
+                                  } else if (val === null || val === undefined) {
+                                    displayVal = '-';
+                                  } else if (typeof val === 'object') {
+                                    displayVal = JSON.stringify(val);
+                                  }
+                                  
+                                  const keyName = Object.keys(row)[cellIdx].toLowerCase();
+                                  const isCountField = /ventas|pedidos|usuarios|clientes|productos|cantidad|count|numero|num|id/i.test(keyName);
+                                  if (typeof val === 'number' && !isCountField && (keyName.includes('total') || keyName.includes('precio') || keyName.includes('salario') || keyName.includes('ingresos') || keyName.includes('puntos'))) {
+                                    displayVal = new Intl.NumberFormat('es-CO', {
+                                      style: 'currency', currency: 'COP', minimumFractionDigits: 0
+                                    }).format(val);
+                                  } else if (keyName.includes('fecha') && val && !isNaN(Date.parse(val))) {
+                                    displayVal = new Date(val).toLocaleDateString('es-CO', {
+                                      month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+                                    });
+                                  }
+
+                                  return (
+                                    <td key={cellIdx} className="p-2 text-white/95 truncate max-w-[150px]" title={String(displayVal)}>
+                                      {displayVal}
+                                    </td>
+                                  );
+                                })}
                               </tr>
                             ))}
                           </tbody>
