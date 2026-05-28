@@ -21,14 +21,14 @@ if (!supabaseUrl || !supabaseKey) {
 const supabase = createClient(supabaseUrl || '', supabaseKey || '');
 
 const app = express();
-const PORT = 5000;
+const PORT = process.env.PORT || 5000;
 const saltRounds = 10; // <--- Configuración de seguridad
 
 // Middleware - CORS Configurado seguro para permitir solo el origen del frontend
-const allowedOrigins = ['http://localhost:3000'];
+const allowedOrigins = ['http://localhost:3000', process.env.FRONTEND_URL].filter(Boolean);
 app.use(cors({
   origin: function (origin, callback) {
-    if (!origin || allowedOrigins.indexOf(origin) !== -1) {
+    if (!origin || allowedOrigins.includes('*') || allowedOrigins.indexOf(origin) !== -1) {
       callback(null, true);
     } else {
       callback(new Error('Acceso denegado por la política CORS del servidor.'));

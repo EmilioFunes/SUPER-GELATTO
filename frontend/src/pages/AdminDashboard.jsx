@@ -21,7 +21,7 @@ const AdminDashboard = ({ user }) => {
   const fetchDashboardData = async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/admin/dashboard', {
+      const res = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/admin/dashboard`, {
         headers: {
           'X-User-Role': user?.rol || ''
         }
@@ -30,7 +30,7 @@ const AdminDashboard = ({ user }) => {
       const data = await res.json();
       
       // También obtenemos productos para la nueva pestaña
-      const prodRes = await fetch('/api/products');
+      const prodRes = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/products`);
       const products = await prodRes.json();
       
       setDashboardData({ ...data, products });
@@ -46,7 +46,7 @@ const AdminDashboard = ({ user }) => {
     
     setActionLoading(id);
     try {
-      const res = await fetch(`/api/admin/users/${id}`, {
+      const res = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/admin/users/${id}`, {
         method: 'DELETE',
         headers: {
           'X-User-Role': user?.rol || ''
@@ -71,7 +71,7 @@ const AdminDashboard = ({ user }) => {
     
     setActionLoading(id);
     try {
-      const res = await fetch(`/api/admin/products/${id}`, {
+      const res = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/admin/products/${id}`, {
         method: 'DELETE',
         headers: {
           'X-User-Role': user?.rol || ''

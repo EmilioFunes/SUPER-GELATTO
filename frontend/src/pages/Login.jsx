@@ -70,7 +70,7 @@ function Login({ onLogin }) {
       const picture = payload.picture;
 
       // Usar el nuevo endpoint dedicado de Google Login
-      const loginRes = await fetch('/api/google-login', {
+      const loginRes = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/google-login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, name }),
@@ -101,7 +101,7 @@ function Login({ onLogin }) {
     if (!isFormValid) return;
     setLoading(true);
     try {
-      const res = await fetch('/api/login', {
+      const res = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(formData),

@@ -69,7 +69,7 @@ const ProfilePage = ({ user, onUpdateUser }) => {
 
     const fetchOrders = async () => {
       try {
-        const response = await fetch(`/api/orders/${user.id}`);
+        const response = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/orders/${user.id}`);
         if (response.ok) {
           const data = await response.json();
           setOrders(data);
@@ -96,7 +96,7 @@ const ProfilePage = ({ user, onUpdateUser }) => {
     setStatus({ type: null, message: '' });
 
     try {
-      const response = await fetch(`/api/users/${user.id}`, {
+      const response = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/users/${user.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: editName, email: editEmail }),

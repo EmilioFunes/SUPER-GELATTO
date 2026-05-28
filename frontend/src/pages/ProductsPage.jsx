@@ -23,7 +23,7 @@ const ProductsPage = ({ user }) => {
   React.useEffect(() => {
     const fetchProducts = async () => {
       try {
-        const res = await fetch('/api/products');
+        const res = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/products`);
         if (!res.ok) throw new Error('Error al conectar con la heladería');
         const data = await res.json();
         setFlavors(data);
