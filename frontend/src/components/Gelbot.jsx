@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Send } from 'lucide-react';
+import { X, Send, Mic } from 'lucide-react';
 import { useCart } from '../context/CartContext';
 
 const parseInlineStyles = (text) => {
@@ -67,6 +67,57 @@ const Gelbot = ({ user }) => {
   const [messages, setMessages] = useState([welcomeMsg(user)]);
   const [input, setInput]       = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [isListening, setIsListening] = useState(false);
+  const messagesEndRef = useRef(null);
+  const recognitionRef = useRef(null);
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages, isLoading]);
+
+  useEffect(() => {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (SpeechRecognition) {
+      const recognition = new SpeechRecognition();
+      recognition.continuous = false;
+      recognition.interimResults = true;
+      recognition.lang = 'es-ES';
+
+      recognition.onresult = (event) => {
+        let currentTranscript = '';
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          currentTranscript += event.results[i][0].transcript;
+        }
+        setInput(currentTranscript);
+      };
+
+      recognition.onerror = (event) => {
+        console.error("Speech recognition error", event.error);
+        setIsListening(false);
+      };
+
+      recognition.onend = () => {
+        setIsListening(false);
+      };
+
+      recognitionRef.current = recognition;
+    }
+  }, []);
+
+  const toggleListening = () => {
+    if (isListening) {
+      recognitionRef.current?.stop();
+      setIsListening(false);
+    } else {
+      setInput('');
+      recognitionRef.current?.start();
+      setIsListening(true);
+    }
+  };
 
   const handleSend = async (e) => {
     e.preventDefault();
@@ -340,13 +391,24 @@ const Gelbot = ({ user }) => {
                   </div>
                 </div>
               )}
+              <div ref={messagesEndRef} />
             </div>
 
             {/* Input */}
-            <form onSubmit={handleSend} className="p-4 border-t border-white/10 flex gap-2 bg-background-dark/50">
+            <form onSubmit={handleSend} className="p-4 border-t border-white/10 flex gap-2 bg-background-dark/50 items-center">
+              <button
+                type="button"
+                onClick={toggleListening}
+                className={`p-2 rounded-full transition-colors flex-shrink-0 ${
+                  isListening ? 'bg-red-500/20 text-red-500 animate-pulse' : 'bg-white/5 text-white/50 hover:text-white'
+                }`}
+                title={isListening ? 'Detener micrófono' : 'Usar micrófono'}
+              >
+                <Mic size={18} />
+              </button>
               <input
                 type="text"
-                placeholder="Pregunta algo..."
+                placeholder={isListening ? 'Escuchando...' : 'Pregunta algo...'}
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 className="flex-1 bg-white/5 border border-white/10 rounded-full px-4 text-sm focus:outline-none focus:border-gold-premium/50"
