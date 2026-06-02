@@ -25,8 +25,8 @@ function Login({ onLogin }) {
       if (name === 'email') {
         if (/\s/.test(value)) {
           error = 'El correo no puede tener espacios.';
-        } else if (!/^[^\s@]+@[^\s@]+\.(com|net|edu)$/i.test(value)) {
-          error = 'Email inválido (debe terminar en .com, .net o .edu).';
+        } else if (!/^[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.(com|net|edu)$/i.test(value)) {
+          error = 'Email inválido (sin caracteres especiales y debe terminar en .com, .net o .edu).';
         }
       }
       if (name === 'password') {
@@ -48,7 +48,7 @@ function Login({ onLogin }) {
 
   const isFormValid = formData.email && 
                      formData.password && 
-                     /^[^\s@]+@[^\s@]+\.(com|net|edu)$/i.test(formData.email) &&
+                     /^[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.(com|net|edu)$/i.test(formData.email) &&
                      !/\s/.test(formData.email) &&
                      !/\s/.test(formData.password) &&
                      !/[<>&"'\/]/.test(formData.email) &&

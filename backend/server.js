@@ -572,10 +572,13 @@ app.post('/api/register', async (req, res) => {
   if (name !== name.trim() || /^\s/.test(name)) {
     return res.status(400).json({ message: 'El nombre no puede tener espacios al inicio ni al final.' });
   }
+  if (/\s{2,}/.test(name)) {
+    return res.status(400).json({ message: 'Solo se permite un espacio sencillo entre palabras.' });
+  }
 
-  const emailRegex = /^[^\s@]+@[^\s@]+\.(com|net|edu)$/i;
+  const emailRegex = /^[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.(com|net|edu)$/i;
   if (!emailRegex.test(email)) {
-    return res.status(400).json({ message: 'El correo debe ser un email válido terminado en .com, .net o .edu.' });
+    return res.status(400).json({ message: 'El correo debe ser un email válido (sin caracteres especiales) terminado en .com, .net o .edu.' });
   }
 
   const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*(),.?":{}|<>])[A-Za-z\d!@#$%^&*(),.?":{}|<>]{8,}$/;
@@ -619,9 +622,9 @@ app.post('/api/login', async (req, res) => {
     return res.status(400).json({ message: 'El correo no puede contener espacios.' });
   }
 
-  const emailRegex = /^[^\s@]+@[^\s@]+\.(com|net|edu)$/i;
+  const emailRegex = /^[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.(com|net|edu)$/i;
   if (!emailRegex.test(email)) {
-    return res.status(400).json({ message: 'El correo debe ser un email válido terminado en .com, .net o .edu.' });
+    return res.status(400).json({ message: 'El correo debe ser un email válido (sin caracteres especiales) terminado en .com, .net o .edu.' });
   }
 
   const { data: user, error } = await supabase.from('usuario').select('*').eq('email', email).single();
@@ -702,9 +705,9 @@ app.post('/api/forgot-password', async (req, res) => {
     return res.status(400).json({ message: 'El correo no puede contener espacios.' });
   }
 
-  const emailRegex = /^[^\s@]+@[^\s@]+\.(com|net|edu)$/i;
+  const emailRegex = /^[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.(com|net|edu)$/i;
   if (!emailRegex.test(email)) {
-    return res.status(400).json({ message: 'El correo debe ser un email válido terminado en .com, .net o .edu.' });
+    return res.status(400).json({ message: 'El correo debe ser un email válido (sin caracteres especiales) terminado en .com, .net o .edu.' });
   }
   const genericMessage = 'Si este correo está registrado, recibirás un enlace.';
 
@@ -913,13 +916,16 @@ app.put('/api/users/:id', async (req, res) => {
     return res.status(400).json({ message: 'El correo no puede contener espacios.' });
   }
 
-  const emailRegex = /^[^\s@]+@[^\s@]+\.(com|net|edu)$/i;
+  const emailRegex = /^[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.(com|net|edu)$/i;
   if (!emailRegex.test(email)) {
-    return res.status(400).json({ message: 'El correo debe ser un email válido terminado en .com, .net o .edu.' });
+    return res.status(400).json({ message: 'El correo debe ser un email válido (sin caracteres especiales) terminado en .com, .net o .edu.' });
   }
 
   if (name !== name.trim() || /^\s/.test(name)) {
     return res.status(400).json({ message: 'El nombre no puede tener espacios al inicio ni al final.' });
+  }
+  if (/\s{2,}/.test(name)) {
+    return res.status(400).json({ message: 'Solo se permite un espacio sencillo entre palabras.' });
   }
 
   try {

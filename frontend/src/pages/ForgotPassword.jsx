@@ -38,8 +38,8 @@ function ForgotPassword() {
       return;
     }
 
-    if (!/^[^\s@]+@[^\s@]+\.(com|net|edu)$/i.test(email)) {
-      setError('Email inválido (debe terminar en .com, .net o .edu).');
+    if (!/^[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.(com|net|edu)$/i.test(email)) {
+      setError('Email inválido (sin caracteres especiales y debe terminar en .com, .net o .edu).');
       return;
     }
 
@@ -125,8 +125,8 @@ function ForgotPassword() {
                     setEmail(val);
                     if (/\s/.test(val)) {
                       setError('El correo no puede tener espacios.');
-                    } else if (val && !/^[^\s@]+@[^\s@]+\.(com|net|edu)$/i.test(val)) {
-                      setError('Email inválido (debe terminar en .com, .net o .edu).');
+                    } else if (val && !/^[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.(com|net|edu)$/i.test(val)) {
+                      setError('Email inválido (sin caracteres especiales y debe terminar en .com, .net o .edu).');
                     } else {
                       setError('');
                     }

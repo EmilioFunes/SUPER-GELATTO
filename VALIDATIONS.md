@@ -11,8 +11,8 @@ El objetivo es proporcionar retroalimentación inmediata y mejorar la experienci
 
 | Campo | Tipo de Validación | Regla / Patrón (Regex) | Acción en Error |
 | :--- | :--- | :--- | :--- |
-| **Nombre** | Presencia / Espacios | `required`, `value === value.trim()` | Mensaje: "Sin espacios al inicio/final" |
-| **Email** | Formato / Espacios | `^[^\s@]+@[^\s@]+\.[^\s@]+$` | Mensaje: "Email inválido o con espacios" |
+| **Nombre** | Presencia / Espacios / Duplicados | `required`, `value === value.trim()`, `!/\s{2,}/.test(value)` | Mensaje: "Sin espacios al inicio/final o duplicados" |
+| **Email** | Formato / Sin caracteres especiales | `^[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.(com\|net\|edu)$` | Mensaje: "Email inválido (sin caracteres especiales)" |
 | **Contraseña** | Complejidad | 8+ chars, Mayús, Minús, Núm, Esp, Sin Espacios | Mensaje: Detalle del requisito faltante |
 | **Confirmar** | Comparación | `value === password` | Mensaje: "No coincide" |
 

@@ -38,13 +38,15 @@ const ProfilePage = ({ user, onUpdateUser }) => {
           error = 'Nombre demasiado corto.';
         } else if (/^\s/.test(value) || value !== value.trim()) {
           error = 'No puede tener espacios al inicio ni al final.';
+        } else if (/\s{2,}/.test(value)) {
+          error = 'Solo se permite un espacio sencillo entre palabras.';
         }
       }
       if (name === 'email') {
         if (/\s/.test(value)) {
           error = 'El correo no puede tener espacios.';
-        } else if (!/^[^\s@]+@[^\s@]+\.(com|net|edu)$/i.test(value)) {
-          error = 'Email inválido (debe terminar en .com, .net o .edu).';
+        } else if (!/^[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.(com|net|edu)$/i.test(value)) {
+          error = 'Email inválido (sin caracteres especiales y debe terminar en .com, .net o .edu).';
         }
       }
     }
@@ -53,7 +55,8 @@ const ProfilePage = ({ user, onUpdateUser }) => {
 
   const isFormValid = editName && 
                       editName.trim().length >= 3 && 
-                      /^[^\s@]+@[^\s@]+\.(com|net|edu)$/i.test(editEmail) && 
+                      !/\s{2,}/.test(editName) &&
+                      /^[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.(com|net|edu)$/i.test(editEmail) && 
                       !/\s/.test(editEmail) &&
                       !/[<>&"'\/]/.test(editEmail) &&
                       !/[<>&"'\/]/.test(editName) &&
