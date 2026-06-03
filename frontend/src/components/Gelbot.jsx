@@ -298,7 +298,7 @@ const Gelbot = ({ user }) => {
                                 <td className="p-2 text-white/90">
                                   {s.usuario?.nombre || 'Cliente'}
                                   <div className="text-[9px] text-white/40 font-mono truncate max-w-[110px]">
-                                    {s.usuario?.email || (s.id_usuario?.slice(0, 8) + '...')}
+                                    {s.usuario?.email || (String(s.id_usuario || '').slice(0, 8) + '...')}
                                   </div>
                                 </td>
                                 <td className="p-2 font-bold text-green-400">

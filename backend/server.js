@@ -1,9 +1,10 @@
 // Desactivar temporalmente la verificación estricta de SSL en Node para entornos locales con certificados auto-firmados / proxys
-process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+if (process.env.NODE_ENV !== 'production') {
+  process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+}
 
 const express = require('express');
 const cors = require('cors');
-const bodyParser = require('body-parser');
 const crypto = require('crypto');
 const nodemailer = require('nodemailer');
 const bcrypt = require('bcryptjs'); // Usamos bcryptjs para mejor compatibilidad en Windows
@@ -539,7 +540,7 @@ function getFlavorData(name) {
 app.post('/api/register', async (req, res) => {
   let { name, lastName, email, password, confirmPassword } = req.body;
 
-  if (hasForbiddenChars(name) || hasForbiddenChars(lastName) || hasForbiddenChars(email) || hasForbiddenChars(password) || hasForbiddenChars(confirmPassword)) {
+  if (hasForbiddenChars(name) || hasForbiddenChars(lastName) || hasForbiddenChars(email)) {
     return res.status(400).json({ message: 'No se permiten caracteres especiales peligrosos (< > & " \' /).' });
   }
 
@@ -614,7 +615,7 @@ app.post('/api/login', async (req, res) => {
 
   if (!email || !password) return res.status(400).json({ message: 'Campos obligatorios.' });
 
-  if (hasForbiddenChars(email) || hasForbiddenChars(password)) {
+  if (hasForbiddenChars(email)) {
     return res.status(400).json({ message: 'No se permiten caracteres especiales peligrosos (< > & " \' /).' });
   }
 
@@ -718,7 +719,7 @@ app.post('/api/forgot-password', async (req, res) => {
   const token = generateResetToken();
   resetTokens.push({ token, email, expiresAt: Date.now() + 3600000, used: false });
 
-  const resetLink = `http://localhost:3000/reset-password/${token}`;
+  const resetLink = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/reset-password/${token}`;
 
   try {
     const emailTransporter = await getTransporter();
@@ -755,10 +756,6 @@ app.post('/api/reset-password/:token', async (req, res) => {
 
   if (password !== confirmPassword) return res.status(400).json({ message: 'No coinciden.' });
 
-  if (hasForbiddenChars(password) || hasForbiddenChars(confirmPassword)) {
-    return res.status(400).json({ message: 'No se permiten caracteres especiales peligrosos (< > & " \' /).' });
-  }
-
   if (password.length < 8) {
     return res.status(400).json({ message: 'La contraseña debe tener al menos 8 caracteres.' });
   }
@@ -793,8 +790,6 @@ app.post('/api/reset-password/:token', async (req, res) => {
     return res.status(500).json({ message: 'Error al actualizar.' });
   }
 });
-
-
 
 // ─── Orders (using 'venta' table for sales) ────────────────
 app.get('/api/orders/:userId', async (req, res) => {
@@ -1014,7 +1009,6 @@ app.delete('/api/admin/products/:id', requireAdmin, async (req, res) => {
   }
 });
 
-// ─── Productos (desde Supabase) ───────────────────────────────
 // ─── Productos (desde Supabase con Fallback) ───────────────────
 app.get('/api/products', async (req, res) => {
   try {
