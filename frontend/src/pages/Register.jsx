@@ -115,7 +115,7 @@ function Register() {
 
       const data = await res.json();
 
-      if (!res.ok) {
+      if (!res.ok || data.ok === false) {
         setErrors({ server: data.message || 'Error al registrarse.' });
         setLoading(false);
         return;

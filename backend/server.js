@@ -1,3 +1,5 @@
+require('dotenv').config();
+
 // Desactivar temporalmente la verificación estricta de SSL en Node para entornos locales con certificados auto-firmados / proxys
 if (process.env.NODE_ENV !== 'production') {
   process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
@@ -5,15 +7,69 @@ if (process.env.NODE_ENV !== 'production') {
 
 const express = require('express');
 const cors = require('cors');
+const compression = require('compression');
 const crypto = require('crypto');
 const nodemailer = require('nodemailer');
 const bcrypt = require('bcryptjs'); // Usamos bcryptjs para mejor compatibilidad en Windows
+const jwt = require('jsonwebtoken');
 const { createClient } = require('@supabase/supabase-js');
-require('dotenv').config();
-const { handleChatbotRequest } = require('./chatbot');
+
+
+const {
+  RekognitionClient,
+  IndexFacesCommand,
+  SearchFacesByImageCommand
+} = require('@aws-sdk/client-rekognition');
 
 const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseKey = process.env.SUPABASE_KEY;
+// Priorizar SUPABASE_SERVICE_ROLE_KEY para realizar operaciones administrativas de backend sin restricciones de RLS
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY;
+
+const JWT_SECRET = process.env.JWT_SECRET || 'supergelatto_secret_jwt_key_2026_default';
+
+// ─── AWS Rekognition Config ─────────────────────────────────────
+const rekognitionRegion = process.env.AWS_REGION || 'us-east-2';
+const rekognitionCollectionId = process.env.REKOGNITION_COLLECTION_ID || 'supergelatto-admins';
+
+const awsCredentials = {
+  accessKeyId: (process.env.AWS_ACCESS_KEY_ID || '').trim(),
+  secretAccessKey: (process.env.AWS_SECRET_ACCESS_KEY || '').trim(),
+};
+if (process.env.AWS_SESSION_TOKEN && process.env.AWS_SESSION_TOKEN.trim()) {
+  awsCredentials.sessionToken = process.env.AWS_SESSION_TOKEN.trim();
+}
+
+const rekognitionClient = new RekognitionClient({
+  region: rekognitionRegion,
+  credentials: awsCredentials
+});
+
+// ─── Estado persistente de DESTACADOS ───────────────────────────
+// Guardamos el mapa {id_producto: boolean} en un archivo local para
+// que sobreviva reinicios del servidor y no dependa de Supabase.
+const fs = require('fs');
+const path = require('path');
+const FEATURED_STORE_PATH = path.join(__dirname, 'featured_state.json');
+
+function loadFeaturedState() {
+  try {
+    if (fs.existsSync(FEATURED_STORE_PATH)) {
+      return JSON.parse(fs.readFileSync(FEATURED_STORE_PATH, 'utf8'));
+    }
+  } catch (e) {}
+  return {};
+}
+
+function saveFeaturedState(state) {
+  try {
+    fs.writeFileSync(FEATURED_STORE_PATH, JSON.stringify(state), 'utf8');
+  } catch (e) {
+    console.warn('No se pudo guardar featured_state.json:', e.message);
+  }
+}
+
+// Mapa en memoria, cargado desde disco al arrancar
+let FEATURED_STATE = loadFeaturedState();
 
 const FALLBACK_PRODUCTS = [
   {
@@ -26,6 +82,7 @@ const FALLBACK_PRODUCTS = [
     categoria: 'Temporada',
     tags: 'Sin gluten, Frutal, Temporada',
     estado: true,
+    destacado: false,
     rating: 4.9,
     reviews: 312
   },
@@ -39,6 +96,7 @@ const FALLBACK_PRODUCTS = [
     categoria: 'Clásico',
     tags: 'Sin gluten, Intenso, Gourmet',
     estado: true,
+    destacado: false,
     rating: 4.8,
     reviews: 489
   },
@@ -52,6 +110,7 @@ const FALLBACK_PRODUCTS = [
     categoria: 'Vegano',
     tags: 'Vegano, Sin lácteos, Sin gluten, Frutal',
     estado: true,
+    destacado: false,
     rating: 4.7,
     reviews: 275
   },
@@ -65,6 +124,7 @@ const FALLBACK_PRODUCTS = [
     categoria: 'Temporada',
     tags: 'Antioxidante, Sin gluten, Frutal',
     estado: true,
+    destacado: false,
     rating: 4.9,
     reviews: 201
   },
@@ -78,6 +138,7 @@ const FALLBACK_PRODUCTS = [
     categoria: 'Clásico',
     tags: 'DOP Certificado, Gourmet, Importado',
     estado: true,
+    destacado: false,
     rating: 5.0,
     reviews: 147
   },
@@ -91,6 +152,7 @@ const FALLBACK_PRODUCTS = [
     categoria: 'Clásico',
     tags: 'Sin gluten, Artesanal, Bestseller',
     estado: true,
+    destacado: false,
     rating: 4.9,
     reviews: 523
   },
@@ -104,6 +166,7 @@ const FALLBACK_PRODUCTS = [
     categoria: 'Clásico',
     tags: 'Sin gluten, Clásico, Gourmet',
     estado: true,
+    destacado: false,
     rating: 4.8,
     reviews: 398
   },
@@ -117,6 +180,7 @@ const FALLBACK_PRODUCTS = [
     categoria: 'Vegano',
     tags: 'Vegano, Sin lácteos, Sin gluten, Refrescante',
     estado: true,
+    destacado: false,
     rating: 4.7,
     reviews: 189
   },
@@ -130,6 +194,7 @@ const FALLBACK_PRODUCTS = [
     categoria: 'Clásico',
     tags: 'Gourmet, Artesanal, Especial',
     estado: true,
+    destacado: false,
     rating: 4.9,
     reviews: 267
   },
@@ -143,6 +208,7 @@ const FALLBACK_PRODUCTS = [
     categoria: 'Vegano',
     tags: 'Vegano, Sin lácteos, Sin gluten, Tropical',
     estado: true,
+    destacado: false,
     rating: 4.6,
     reviews: 143
   },
@@ -156,6 +222,7 @@ const FALLBACK_PRODUCTS = [
     categoria: 'Temporada',
     tags: 'Premium, Edición Limitada, Floral',
     estado: true,
+    destacado: false,
     rating: 5.0,
     reviews: 89
   },
@@ -169,6 +236,7 @@ const FALLBACK_PRODUCTS = [
     categoria: 'Vegano',
     tags: 'Vegano, Sin lácteos, Antioxidante, Ceremonial',
     estado: true,
+    destacado: false,
     rating: 4.8,
     reviews: 176
   }
@@ -184,7 +252,36 @@ const isSupabaseConfigured = supabaseUrl &&
 if (isSupabaseConfigured) {
   try {
     supabase = createClient(supabaseUrl, supabaseKey);
-    console.log('✅ Cliente Supabase inicializado correctamente.');
+    const keyType = process.env.SUPABASE_SERVICE_ROLE_KEY ? 'Service Role Key (Bypass RLS)' : 'Anon Key';
+    console.log(`✅ Cliente Supabase inicializado correctamente con ${keyType}.`);
+
+    // Auto-crear tabla admin_face_rekognition si no existe
+    supabase.from('admin_face_rekognition').select('id').limit(1).then(({ error }) => {
+      if (error && (error.code === 'PGRST205' || error.message?.includes('does not exist') || error.message?.includes('not found'))) {
+        console.log('ℹ️ Tabla admin_face_rekognition no encontrada, creando...');
+        const createSql = `
+          CREATE TABLE IF NOT EXISTS public.admin_face_rekognition (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            aws_face_id TEXT UNIQUE NOT NULL,
+            id_usuario INTEGER NOT NULL REFERENCES public.usuario(id_usuario) ON DELETE CASCADE,
+            created_at TIMESTAMPTZ DEFAULT NOW()
+          );
+          ALTER TABLE public.admin_face_rekognition ENABLE ROW LEVEL SECURITY;
+        `;
+        fetch(`${supabaseUrl}/rest/v1/rpc/exec_sql`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'apikey': supabaseKey,
+            'Authorization': `Bearer ${supabaseKey}`
+          },
+          body: JSON.stringify({ sql: createSql })
+        }).then(r => {
+          if (r.ok) console.log('✅ Tabla admin_face_rekognition creada automáticamente.');
+          else console.warn('⚠️ No se pudo auto-crear la tabla. Ejecútalo manualmente en el SQL Editor de Supabase.');
+        }).catch(() => console.warn('⚠️ No se pudo auto-crear la tabla. Ejecútalo manualmente en el SQL Editor de Supabase.'));
+      }
+    });
   } catch (err) {
     console.error('❌ Error al inicializar Supabase:', err);
   }
@@ -197,9 +294,11 @@ if (!supabase) {
   const mockDb = {
     producto: FALLBACK_PRODUCTS,
     usuario: [
-      { id_usuario: 1, nombre: 'Admin', apellido: 'SuperGelatto', email: 'admin@supergelatto.com', password_hash: '$2a$10$xyz', rol: 'admin' },
-      { id_usuario: 2, nombre: 'Cliente', apellido: 'Prueba', email: 'cliente@supergelatto.com', password_hash: '$2a$10$xyz', rol: 'cliente' }
+      { id_usuario: 1, nombre: 'Admin', apellido: 'SuperGelatto', email: 'saldarriagac890@gmail.com', password_hash: '$2a$10$GamiM2h7IwlRhosL5hQD0.OSBb2rdwSXVmkfpQS1rNOTkC2.Cw3zK', rol: 'admin' },
+      { id_usuario: 2, nombre: 'Admin', apellido: 'Secundario', email: 'admin@supergelatto.com', password_hash: '$2a$10$GamiM2h7IwlRhosL5hQD0.OSBb2rdwSXVmkfpQS1rNOTkC2.Cw3zK', rol: 'admin' },
+      { id_usuario: 3, nombre: 'Cliente', apellido: 'Prueba', email: 'cliente@supergelatto.com', password_hash: '$2a$10$.2ki7UXxL2rjAX8VqUIIEewGFKxfLiGpqLeXZLX6oN7elDoMDQJU6', rol: 'cliente' }
     ],
+    rostros_admin: [],
     venta: []
   };
 
@@ -211,7 +310,7 @@ if (!supabase) {
         return builder;
       },
       eq: (field, value) => {
-        queryData = queryData.filter(item => item[field] === value);
+        queryData = queryData.filter(item => String(item[field]) === String(value));
         return builder;
       },
       order: (field, options) => {
@@ -231,7 +330,7 @@ if (!supabase) {
         const item = queryData[0];
         return { data: item || null, error: item ? null : { message: 'Not found' } };
       },
-      insert: async (arr) => {
+      insert: (arr) => {
         const newItems = arr.map((item) => {
           const nextId = mockDb[tableName].length + 1;
           return {
@@ -245,13 +344,22 @@ if (!supabase) {
         });
         mockDb[tableName].push(...newItems);
         queryData = newItems;
-        return { data: newItems[0] || null, error: null };
+        return builder;
       },
-      update: async (obj) => {
-        queryData.forEach(item => {
-          Object.assign(item, obj);
-        });
-        return { data: queryData[0] || null, error: null };
+      upsert: (obj) => {
+        const item = Array.isArray(obj) ? obj[0] : obj;
+        if (!mockDb[tableName]) mockDb[tableName] = [];
+        const existingIdx = mockDb[tableName].findIndex(i => i.id_usuario === item.id_usuario);
+        if (existingIdx >= 0) {
+          Object.assign(mockDb[tableName][existingIdx], item);
+        } else {
+          mockDb[tableName].push({ ...item });
+        }
+        return Promise.resolve({ data: item, error: null });
+      },
+      in: (field, values) => {
+        queryData = queryData.filter(item => values.includes(item[field]));
+        return builder;
       },
       delete: async () => {
         const idsToRemove = queryData.map(item => item.id_usuario || item.id_producto || item.id_venta);
@@ -277,6 +385,7 @@ if (!supabase) {
 }
 
 const app = express();
+app.use(compression());
 const PORT = process.env.PORT || 5000;
 const saltRounds = 10; // <--- Configuración de seguridad
 
@@ -299,7 +408,8 @@ app.use(cors({
   },
   credentials: true
 }));
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 app.use((req, res, next) => {
   console.log(`${new Date().toISOString()} - ${req.method} ${req.url}`);
@@ -367,14 +477,29 @@ function hasForbiddenChars(str) {
   return /[<>&"'\/]/.test(str);
 }
 
-// Middleware para validar que el usuario es administrador
-function requireAdmin(req, res, next) {
-  const role = req.headers['x-user-role'];
-  if (role !== 'admin') {
-    return res.status(403).json({ message: 'Acceso denegado. Se requieren permisos de administrador.' });
+// Middleware seguro para validar que la petición incluye un JWT válido de Administrador
+function requireAuthenticatedAdmin(req, res, next) {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.startsWith('Bearer ') ? authHeader.split(' ')[1] : req.headers['x-user-token'];
+
+  if (!token) {
+    return res.status(401).json({ message: 'Acceso denegado. No se proporcionó un token de autenticación.' });
   }
-  next();
+
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    if (!decoded || decoded.rol !== 'admin') {
+      return res.status(403).json({ message: 'Acceso denegado. Se requieren permisos de administrador.' });
+    }
+    req.user = decoded;
+    next();
+  } catch (err) {
+    return res.status(401).json({ message: 'Token de sesión inválido o expirado. Por favor inicia sesión nuevamente.' });
+  }
 }
+
+// Alias para mantener compatibilidad con rutas existentes
+const requireAdmin = requireAuthenticatedAdmin;
 
 // Helper para asignar imágenes reales basadas en el nombre
 function getProductImage(name) {
@@ -646,11 +771,168 @@ app.post('/api/login', async (req, res) => {
     }
   }
 
+  // GENERAR TOKEN JWT FIRMADO
+  const token = jwt.sign(
+    { id_usuario: user.id_usuario, email: user.email, rol: user.rol },
+    JWT_SECRET,
+    { expiresIn: '24h' }
+  );
+
   return res.status(200).json({
+    ok: true,
     message: 'Inicio de sesión exitoso.',
-    user: { id: user.id_usuario, name: user.nombre, email: user.email, rol: user.rol }
+    token,
+    user: { id: user.id_usuario, id_usuario: user.id_usuario, name: user.nombre, email: user.email, rol: user.rol }
   });
 });
+
+// ─── AWS Rekognition (Reconocimiento Facial Admin) ─────────────────
+
+// 1. Registro Facial con AWS Rekognition (Protegido Admin)
+app.post('/api/admin/faceid/rekognition-register', requireAuthenticatedAdmin, async (req, res) => {
+  try {
+    const { image } = req.body;
+    const userId = req.user.id_usuario;
+
+    if (!image || typeof image !== 'string') {
+      return res.status(400).json({ ok: false, message: 'La imagen en base64 es obligatoria.' });
+    }
+
+    const cleanBase64 = image.replace(/^data:image\/\w+;base64,/, '');
+    const imageBuffer = Buffer.from(cleanBase64, 'base64');
+
+    const command = new IndexFacesCommand({
+      CollectionId: rekognitionCollectionId,
+      Image: { Bytes: imageBuffer },
+      ExternalImageId: String(userId),
+      MaxFaces: 1,
+      QualityFilter: 'AUTO',
+      DetectionAttributes: []
+    });
+
+    const response = await rekognitionClient.send(command);
+
+    if (!response.FaceRecords || response.FaceRecords.length === 0 || !response.FaceRecords[0]?.Face?.FaceId) {
+      return res.status(400).json({
+        ok: false,
+        message: 'No se detectó ningún rostro claro en la imagen. Asegúrate de tener buena iluminación y mirar de frente a la cámara.'
+      });
+    }
+
+    const faceId = response.FaceRecords[0].Face.FaceId;
+
+    // Guardar estrictamente en Supabase (sin respaldo en memoria)
+    const { error: dbErr } = await supabase
+      .from('admin_face_rekognition')
+      .insert([{ aws_face_id: faceId, id_usuario: userId }]);
+
+    if (dbErr) {
+      console.error('❌ Error al guardar registro facial en Supabase:', dbErr);
+      return res.status(500).json({
+        ok: false,
+        message: 'Error al guardar la vinculación facial en la base de datos. Por favor reintenta.'
+      });
+    }
+
+    return res.status(200).json({
+      ok: true,
+      message: '¡Reconocimiento facial registrado exitosamente con AWS Rekognition!',
+      faceId
+    });
+  } catch (err) {
+    console.error('Error al registrar rostro en AWS Rekognition:', err);
+    let msg = err.message || 'Error al procesar el reconocimiento facial en AWS Rekognition.';
+    if (err.name === 'UnrecognizedClientException' || err.name === 'InvalidSignatureException' || (msg && msg.includes('security token included in the request is invalid'))) {
+      msg = 'Las credenciales de AWS (AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY) en tu backend/.env son inválidas o han expirado en AWS IAM. Por favor actualiza tus llaves de AWS.';
+    }
+    return res.status(500).json({
+      ok: false,
+      message: msg
+    });
+  }
+});
+
+// 2. Login Facial con AWS Rekognition (Público)
+app.post('/api/admin/faceid/rekognition-login', async (req, res) => {
+  const genericError = { ok: false, message: 'Reconocimiento facial no reconocido o acceso denegado.' };
+  try {
+    const { image } = req.body;
+    if (!image || typeof image !== 'string') {
+      return res.status(400).json(genericError);
+    }
+
+    const cleanBase64 = image.replace(/^data:image\/\w+;base64,/, '');
+    const imageBuffer = Buffer.from(cleanBase64, 'base64');
+
+    const command = new SearchFacesByImageCommand({
+      CollectionId: rekognitionCollectionId,
+      Image: { Bytes: imageBuffer },
+      MaxFaces: 1,
+      FaceMatchThreshold: 75
+    });
+
+    const response = await rekognitionClient.send(command);
+    const SIMILARITY_THRESHOLD = 75;
+
+    if (!response.FaceMatches || response.FaceMatches.length === 0) {
+      console.warn('⚠️ rekognition-login: AWS no encontró ninguna coincidencia facial.');
+      return res.status(401).json(genericError);
+    }
+
+    const match = response.FaceMatches[0];
+    console.log(`ℹ️ rekognition-login: similarity=${match.Similarity?.toFixed(2)}% faceId=${match.Face?.FaceId}`);
+    if (!match.Similarity || match.Similarity < SIMILARITY_THRESHOLD || !match.Face?.FaceId) {
+      console.warn(`⚠️ rekognition-login: similarity ${match.Similarity?.toFixed(2)}% < ${SIMILARITY_THRESHOLD}% (umbral mínimo)`);
+      return res.status(401).json(genericError);
+    }
+
+    const matchedFaceId = match.Face.FaceId;
+
+    // Buscar id_usuario vinculado ÚNICAMENTE en la base de datos Supabase
+    const { data: faceRecord, error: faceErr } = await supabase
+      .from('admin_face_rekognition')
+      .select('id_usuario')
+      .eq('aws_face_id', matchedFaceId)
+      .maybeSingle();
+
+    if (faceErr || !faceRecord || !faceRecord.id_usuario) {
+      console.warn('⚠️ Rostro reconocido por AWS pero no encontrado en la tabla admin_face_rekognition:', faceErr?.message || matchedFaceId);
+      return res.status(401).json(genericError);
+    }
+
+    const userId = faceRecord.id_usuario;
+
+    // Buscar el usuario real en la tabla "usuario" de Supabase
+    const { data: user, error: userErr } = await supabase
+      .from('usuario')
+      .select('*')
+      .eq('id_usuario', userId)
+      .maybeSingle();
+
+    if (userErr || !user || user.rol !== 'admin') {
+      console.warn('⚠️ Usuario no encontrado o no posee rol admin:', userErr?.message || userId);
+      return res.status(401).json(genericError);
+    }
+
+    const token = jwt.sign(
+      { id_usuario: user.id_usuario, email: user.email, rol: user.rol },
+      JWT_SECRET,
+      { expiresIn: '24h' }
+    );
+
+    return res.status(200).json({
+      ok: true,
+      message: 'Inicio de sesión facial exitoso.',
+      token,
+      user: { id: user.id_usuario, id_usuario: user.id_usuario, name: user.nombre, email: user.email, rol: user.rol }
+    });
+  } catch (err) {
+    console.error('Error al autenticar por rostro en AWS Rekognition:', err);
+    return res.status(401).json(genericError);
+  }
+});
+
+
 
 // ─── Google Login ───────────────────────────────────────────
 app.post('/api/google-login', async (req, res) => {
@@ -965,6 +1247,43 @@ app.get('/api/admin/dashboard', requireAdmin, async (req, res) => {
 
     if (salesError) throw salesError;
 
+    // Obtener productos
+    let products = [];
+    try {
+      const { data: prodData } = await supabase.from('producto').select('*').order('id_producto', { ascending: true });
+      if (prodData && prodData.length > 0) {
+        products = prodData.map(p => ({
+          id: p.id_producto,
+          name: p.nombre,
+          precio: p.precio,
+          desc: p.descripcion,
+          image: p.imagen || getProductImage(p.nombre),
+          categoria: p.categoria || 'Clásico',
+          destacado: Boolean(p.destacado !== undefined ? p.destacado : false)
+        }));
+      } else {
+        products = FALLBACK_PRODUCTS.map(p => ({
+          id: p.id_producto,
+          name: p.nombre,
+          precio: p.precio,
+          desc: p.descripcion,
+          image: p.imagen || getProductImage(p.nombre),
+          categoria: p.categoria || 'Clásico',
+          destacado: Boolean(p.destacado !== undefined ? p.destacado : false)
+        }));
+      }
+    } catch (e) {
+      products = FALLBACK_PRODUCTS.map(p => ({
+        id: p.id_producto,
+        name: p.nombre,
+        precio: p.precio,
+        desc: p.descripcion,
+        image: p.imagen || getProductImage(p.nombre),
+        categoria: p.categoria || 'Clásico',
+        destacado: Boolean(p.destacado !== undefined ? p.destacado : false)
+      }));
+    }
+
     // Calcular estadísticas
     const totalRevenue = sales.reduce((sum, sale) => sum + (sale.total || 0), 0);
     const activeUsers = users.filter(u => u.rol === 'cliente').length;
@@ -976,7 +1295,8 @@ app.get('/api/admin/dashboard', requireAdmin, async (req, res) => {
         totalSales: sales.length
       },
       users,
-      sales
+      sales,
+      products
     });
   } catch (error) {
     console.error('Error fetching admin dashboard data:', error);
@@ -987,25 +1307,284 @@ app.get('/api/admin/dashboard', requireAdmin, async (req, res) => {
 app.delete('/api/admin/users/:id', requireAdmin, async (req, res) => {
   const { id } = req.params;
   try {
+    const { data: targetUser } = await supabase.from('usuario').select('*').eq('id_usuario', id).single();
+
+    if (!targetUser) {
+      return res.status(404).json({ message: 'Usuario no encontrado.' });
+    }
+
+    if (targetUser.rol === 'admin') {
+      return res.status(403).json({ message: 'Acceso denegado. No está permitido eliminar cuentas de administrador.' });
+    }
+
     const { error } = await supabase.from('usuario').delete().eq('id_usuario', id);
     if (error) throw error;
-    return res.status(200).json({ message: 'Usuario eliminado correctamente.' });
+    return res.status(200).json({ message: 'Cuenta de cliente eliminada correctamente.' });
   } catch (error) {
+    console.error('Error al eliminar usuario:', error);
     return res.status(500).json({ message: 'Error al eliminar usuario.' });
+  }
+});
+
+app.put('/api/admin/users/:id/role', requireAdmin, async (req, res) => {
+  const { id } = req.params;
+  const { rol } = req.body;
+
+  if (!rol || !['admin', 'cliente'].includes(rol)) {
+    return res.status(400).json({ message: 'Rol no válido.' });
+  }
+
+  try {
+    const { error } = await supabase.from('usuario').update({ rol }).eq('id_usuario', id);
+    if (error) throw error;
+    return res.status(200).json({ message: 'Rol de usuario actualizado correctamente.', id, rol });
+  } catch (error) {
+    console.error('Error al actualizar rol de usuario:', error);
+    return res.status(500).json({ message: 'Error al actualizar el rol del usuario.' });
+  }
+});
+
+// Endpoint para crear un nuevo Administrador y enrolar su Face ID
+app.post('/api/admin/create-admin', requireAdmin, async (req, res) => {
+  let { name, lastName, email, password } = req.body;
+  if (!name || !email || !password) {
+    return res.status(400).json({ message: 'Nombre, correo y contraseña son obligatorios.' });
+  }
+
+  try {
+    const hashedPassword = await bcrypt.hash(password, saltRounds);
+
+    const { data: newUser, error } = await supabase
+      .from('usuario')
+      .insert([{ nombre: name, apellido: lastName || '', email, password_hash: hashedPassword, rol: 'admin' }])
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Error al insertar nuevo admin:', error);
+      throw error;
+    }
+
+    const createdUser = newUser || { id_usuario: Date.now(), nombre: name, apellido: lastName, email, rol: 'admin' };
+
+    return res.status(201).json({
+      ok: true,
+      message: 'Administrador registrado con éxito.',
+      user: createdUser
+    });
+  } catch (error) {
+    console.error('Error en /api/admin/create-admin:', error);
+    return res.status(500).json({ message: error.message || 'Error interno al crear el administrador.' });
   }
 });
 
 // Nota: Para añadir un usuario se usa el flujo de /api/register (con o sin admin check).
 // Nota: La tabla de productos puede no estar completamente configurada en Supabase según los datos, 
 // pero dejamos el endpoint preparado.
+// Endpoint para agregar un nuevo producto al catálogo
+app.post('/api/admin/products', requireAdmin, async (req, res) => {
+  let { name, description, price, category, image, featured } = req.body;
+
+  if (!name || !price) {
+    return res.status(400).json({ message: 'El nombre y el precio del producto son obligatorios.' });
+  }
+
+  const numPrice = parseFloat(price);
+  if (isNaN(numPrice) || numPrice <= 0) {
+    return res.status(400).json({ message: 'El precio debe ser un número mayor a 0.' });
+  }
+
+  try {
+    const nextId = Date.now();
+    const finalImage = image || getProductImage(name);
+    const isFeatured = Boolean(featured);
+    const cat = category || 'Clásico';
+    const desc = description || '';
+
+    const newProdItem = {
+      id_producto: nextId,
+      nombre: name,
+      precio: numPrice,
+      descripcion: desc,
+      imagen: finalImage,
+      categoria: cat,
+      destacado: isFeatured,
+      estado: true,
+      rating: 4.9,
+      reviews: 1
+    };
+
+    // Insertar en Supabase o mockDb
+    try {
+      await supabase.from('producto').insert([newProdItem]);
+    } catch (e) {
+      console.warn('Advertencia al insertar producto en Supabase:', e);
+    }
+
+    // Agregar a FALLBACK_PRODUCTS para sincronización local en memoria
+    FALLBACK_PRODUCTS.unshift(newProdItem);
+
+    const createdProductObj = {
+      id: nextId,
+      name: name,
+      precio: numPrice,
+      price: numPrice,
+      desc: desc,
+      image: finalImage,
+      categoria: cat,
+      destacado: isFeatured
+    };
+
+    return res.status(201).json({
+      ok: true,
+      message: 'Producto creado y agregado al catálogo exitosamente.',
+      product: createdProductObj
+    });
+  } catch (error) {
+    console.error('Error al crear producto:', error);
+    return res.status(500).json({ message: 'Error interno al crear el producto.' });
+  }
+});
+
 app.delete('/api/admin/products/:id', requireAdmin, async (req, res) => {
   const { id } = req.params;
   try {
-    const { error } = await supabase.from('producto').delete().eq('id_producto', id);
+    const prodId = parseInt(id, 10);
+    const { error } = await supabase.from('producto').delete().eq('id_producto', prodId);
     if (error) throw error;
+    // Fallback local
+    const fbIdx = FALLBACK_PRODUCTS.findIndex(p => p.id_producto === prodId);
+    if (fbIdx !== -1) FALLBACK_PRODUCTS.splice(fbIdx, 1);
     return res.status(200).json({ message: 'Producto eliminado correctamente.' });
   } catch (error) {
     return res.status(500).json({ message: 'Error al eliminar producto.' });
+  }
+});
+
+// Actualizar imagen de un producto
+app.put('/api/admin/products/:id/image', requireAdmin, async (req, res) => {
+  const { id } = req.params;
+  const { image } = req.body;
+
+  if (!image) {
+    return res.status(400).json({ message: 'La URL o datos de la imagen son obligatorios.' });
+  }
+
+  try {
+    const prodId = parseInt(id, 10);
+    
+    // Actualizar en mockDb/Supabase
+    try {
+      await supabase.from('producto').update({ imagen: image }).eq('id_producto', prodId);
+    } catch (e) {
+      console.warn('Advertencia en actualización Supabase:', e);
+    }
+
+    const fbItem = FALLBACK_PRODUCTS.find(p => p.id_producto === prodId);
+    if (fbItem) {
+      fbItem.imagen = image;
+    }
+
+    return res.status(200).json({ ok: true, message: 'Imagen del producto actualizada con éxito.', id: prodId, image });
+  } catch (error) {
+    console.error('Error al actualizar imagen:', error);
+    return res.status(500).json({ message: 'Error al actualizar imagen del producto.' });
+  }
+});
+
+// Actualizar estado destacado del producto
+app.put('/api/admin/products/:id/featured', requireAdmin, async (req, res) => {
+  const { id } = req.params;
+  const { destacado } = req.body;
+
+  try {
+    const prodId = parseInt(id, 10);
+    const isFeatured = Boolean(destacado);
+
+    // 1. Guardar en archivo persistente (fuente de verdad principal)
+    FEATURED_STATE[prodId] = isFeatured;
+    saveFeaturedState(FEATURED_STATE);
+
+    // 2. Actualizar en memoria del fallback
+    const fbItem = FALLBACK_PRODUCTS.find(p => p.id_producto === prodId);
+    if (fbItem) fbItem.destacado = isFeatured;
+
+    // 3. Intentar Supabase (opcional, no bloquea)
+    try {
+      await supabase.from('producto').update({ destacado: isFeatured }).eq('id_producto', prodId);
+    } catch (e) {
+      console.warn('Advertencia en actualización Supabase (no crítico):', e.message);
+    }
+
+    console.log(`✅ Producto ${prodId} destacado=${isFeatured} guardado en disco.`);
+    return res.status(200).json({ ok: true, message: `Producto ${isFeatured ? 'destacado' : 'retirado de destacados'} con éxito.`, id: prodId, destacado: isFeatured });
+  } catch (error) {
+    console.error('Error al actualizar estado destacado:', error);
+    return res.status(500).json({ message: 'Error al actualizar estado destacado.' });
+  }
+});
+
+// Actualizar precio del producto
+app.put('/api/admin/products/:id/price', requireAdmin, async (req, res) => {
+  const { id } = req.params;
+  const { precio } = req.body;
+  const numPrice = parseInt(precio, 10);
+
+  if (!numPrice || numPrice <= 0) {
+    return res.status(400).json({ message: 'El precio debe ser un número positivo.' });
+  }
+
+  try {
+    const prodId = parseInt(id, 10);
+
+    // Actualizar en fallback en memoria
+    const fbItem = FALLBACK_PRODUCTS.find(p => p.id_producto === prodId);
+    if (fbItem) fbItem.precio = numPrice;
+
+    // Intentar Supabase
+    try {
+      await supabase.from('producto').update({ precio: numPrice }).eq('id_producto', prodId);
+    } catch (e) {
+      console.warn('Advertencia Supabase al actualizar precio:', e.message);
+    }
+
+    console.log(`✅ Producto ${prodId} precio=${numPrice} actualizado.`);
+    return res.status(200).json({ ok: true, message: 'Precio actualizado con éxito.', id: prodId, precio: numPrice });
+  } catch (error) {
+    console.error('Error al actualizar precio:', error);
+    return res.status(500).json({ message: 'Error al actualizar el precio.' });
+  }
+});
+
+// Actualizar categoría del producto
+app.put('/api/admin/products/:id/category', requireAdmin, async (req, res) => {
+  const { id } = req.params;
+  const { categoria } = req.body;
+  const VALID_CATS = ['Clásico', 'Vegano', 'Temporada', 'Gourmet'];
+
+  if (!categoria || !VALID_CATS.includes(categoria)) {
+    return res.status(400).json({ message: 'Categoría inválida. Opciones: ' + VALID_CATS.join(', ') });
+  }
+
+  try {
+    const prodId = parseInt(id, 10);
+
+    // Actualizar en fallback en memoria
+    const fbItem = FALLBACK_PRODUCTS.find(p => p.id_producto === prodId);
+    if (fbItem) fbItem.categoria = categoria;
+
+    // Intentar Supabase
+    try {
+      await supabase.from('producto').update({ categoria }).eq('id_producto', prodId);
+    } catch (e) {
+      console.warn('Advertencia Supabase al actualizar categoría:', e.message);
+    }
+
+    console.log(`✅ Producto ${prodId} categoría=${categoria} actualizada.`);
+    return res.status(200).json({ ok: true, message: 'Categoría actualizada con éxito.', id: prodId, categoria });
+  } catch (error) {
+    console.error('Error al actualizar categoría:', error);
+    return res.status(500).json({ message: 'Error al actualizar la categoría.' });
   }
 });
 
@@ -1060,6 +1639,10 @@ app.get('/api/products', async (req, res) => {
         longDesc:    p.long_desc || p.descripcion || '',
         image:       p.imagen || getProductImage(p.nombre),
         categoria:   cat,
+        // FEATURED_STATE tiene prioridad absoluta sobre Supabase y fallback
+        destacado:   FEATURED_STATE.hasOwnProperty(p.id_producto)
+                       ? FEATURED_STATE[p.id_producto]
+                       : Boolean(p.destacado !== undefined ? p.destacado : false),
         badge:       cat,
         badgeColor:  badgeColor,
         accent:      accent,
