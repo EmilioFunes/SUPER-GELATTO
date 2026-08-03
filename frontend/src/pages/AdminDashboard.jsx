@@ -3,7 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { 
   Users, ShoppingBag, IceCream, Trash2, Shield, Plus, 
   RefreshCw, AlertTriangle, Box, Sparkles, Key, CheckCircle, 
-  X, Camera, Loader2, ArrowRight, Star, Image, Upload, Eye
+  X, Camera, Loader2, ArrowRight, Star, Image, Upload, Eye,
+  Mail, Receipt
 } from 'lucide-react';
 import Model3DPreview from '../components/Model3DPreview';
 import CapturaFacial from '../components/CapturaFacial';
@@ -153,6 +154,33 @@ const AdminDashboard = ({ user, onLogout }) => {
   // --- Update Price State ---
   const [editingPrice, setEditingPrice] = useState(null); // { id, value }
   const [updatingPrice, setUpdatingPrice] = useState(null);
+  const [updatingSaleStatus, setUpdatingSaleStatus] = useState(null);
+
+  const handleUpdateSaleStatus = async (saleId, newStatus) => {
+    setUpdatingSaleStatus(saleId);
+    setDashboardData(prev => ({
+      ...prev,
+      sales: (prev.sales || []).map(s => String(s.id_venta) === String(saleId) ? { ...s, estado: newStatus } : s)
+    }));
+    try {
+      const res = await apiFetch(`/api/admin/sales/${saleId}/status`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ estado: newStatus })
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        alert(data.message || 'Error al cambiar el estado de la venta.');
+        fetchDashboardData();
+      }
+    } catch (err) {
+      console.error('Error al actualizar estado de la venta:', err);
+      alert('Error de conexión al actualizar el estado de la venta.');
+      fetchDashboardData();
+    } finally {
+      setUpdatingSaleStatus(null);
+    }
+  };
 
   const handleSavePrice = async (productId) => {
     if (!editingPrice || String(editingPrice.id) !== String(productId)) return;
@@ -403,8 +431,12 @@ const AdminDashboard = ({ user, onLogout }) => {
           users: prev.users.filter(u => (u.id_usuario || u.id) !== id),
           stats: { ...prev.stats, activeUsers: prev.stats.activeUsers - 1 }
         }));
-      } else if (res.status === 401) {
-        setIsQrVerified(false);
+      } else {
+        const data = await res.json().catch(() => ({}));
+        alert(data.message || 'Error al eliminar usuario');
+        if (res.status === 401) {
+          setIsQrVerified(false);
+        }
       }
     } catch (err) {
       alert('Error al eliminar usuario');
@@ -849,17 +881,52 @@ const AdminDashboard = ({ user, onLogout }) => {
                 <tbody className="divide-y divide-white/5">
                   {Array.from(new Map((dashboardData?.users || []).map((u, idx) => [u.id_usuario || u.id || `user-${idx}`, u])).values()).map((u, idx) => {
                     const userId = u.id_usuario || u.id || idx;
+                    const SUPER_ADMIN_EMAIL = 'muneracristian63@gmail.com';
+                    const savedUserStr = typeof window !== 'undefined' ? (localStorage.getItem('superGelatto_user') || sessionStorage.getItem('superGelatto_user')) : null;
+                    const savedUser = savedUserStr ? JSON.parse(savedUserStr) : null;
+                    const activeUser = user || savedUser;
+                    const currentUserEmail = (activeUser?.email || '').toLowerCase();
+                    const isCurrentUserSuperAdmin = currentUserEmail === SUPER_ADMIN_EMAIL;
+
+                    const targetEmail = (u.email || '').toLowerCase();
+                    const isTargetSuperAdmin = targetEmail === SUPER_ADMIN_EMAIL;
+                    const isTargetAdmin = u.rol === 'admin';
+
+                    // Modificación de Rol:
+                    // 1. Nadie puede cambiar el rol del Super Admin principal.
+                    // 2. Si el objetivo es Administrador, SOLO el Super Admin (muneracristian63@gmail.com) puede cambiar su rol (bajarlo a cliente).
+                    // 3. Si el objetivo es Cliente, cualquier Administrador puede ascenderlo a admin.
+                    const canEditRole = !isTargetSuperAdmin && (!isTargetAdmin || isCurrentUserSuperAdmin);
+
+                    // Eliminación de Usuario:
+                    // 1. Nadie puede eliminar la cuenta del Super Admin principal.
+                    // 2. Si el objetivo es Administrador, SOLO el Super Admin puede eliminarlo (y no a sí mismo).
+                    // 3. Si el objetivo es Cliente, cualquier Administrador puede eliminarlo.
+                    const canDeleteUser = !isTargetSuperAdmin && (
+                      !isTargetAdmin || (isTargetAdmin && isCurrentUserSuperAdmin && String(userId) !== String(activeUser?.id_usuario || activeUser?.id))
+                    );
+
                     return (
                       <tr key={userId} className="hover:bg-white/[0.02] transition-colors group">
                         <td className="p-6 text-white/20 font-mono text-xs">#{userId}</td>
                         <td className="p-6 font-medium">{u.nombre} {u.apellido}</td>
-                        <td className="p-6 text-white/60">{u.email}</td>
+                        <td className="p-6 text-white/60">
+                          {u.email}
+                          {isTargetSuperAdmin && (
+                            <span className="ml-2 text-[9px] px-2 py-0.5 rounded-full bg-gold-premium/20 text-gold-premium border border-gold-premium/40 font-bold uppercase tracking-wider">
+                              Super Admin
+                            </span>
+                          )}
+                        </td>
                         <td className="p-6">
                           <select
                             value={u.rol || 'cliente'}
-                            disabled={actionLoading === `role-${userId}`}
+                            disabled={!canEditRole || actionLoading === `role-${userId}`}
                             onChange={(e) => handleUpdateRole(userId, e.target.value)}
-                            className={`px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider cursor-pointer focus:outline-none transition-all ${
+                            title={!canEditRole ? (isTargetSuperAdmin ? 'Cuenta principal protegida' : 'Solo la cuenta principal de Super Admin puede cambiar el rol de un administrador') : 'Cambiar rol'}
+                            className={`px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider focus:outline-none transition-all ${
+                              !canEditRole ? 'opacity-60 cursor-not-allowed ' : 'cursor-pointer '
+                            }${
                               u.rol === 'admin' 
                               ? 'bg-gold-premium/20 text-gold-premium border border-gold-premium/40 hover:bg-gold-premium/30' 
                               : 'bg-white/10 text-white/70 border border-white/20 hover:bg-white/20'
@@ -871,12 +938,12 @@ const AdminDashboard = ({ user, onLogout }) => {
                         </td>
                         <td className="p-6 text-white/40 text-sm">{formatDate(u.fecha_registro)}</td>
                         <td className="p-6 text-right flex items-center justify-end gap-2">
-                          {u.rol === 'cliente' && (u.id_usuario || u.id) !== user?.id ? (
+                          {canDeleteUser ? (
                             <button 
                               disabled={actionLoading === (u.id_usuario || u.id)}
                               onClick={() => handleDeleteUser(u.id_usuario || u.id)}
                               className="p-2 text-white/20 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all cursor-pointer"
-                              title="Eliminar cuenta de cliente"
+                              title={u.rol === 'admin' ? "Eliminar cuenta de administrador" : "Eliminar cuenta de cliente"}
                             >
                               {actionLoading === (u.id_usuario || u.id) ? <RefreshCw className="animate-spin" size={18} /> : <Trash2 size={18} />}
                             </button>
@@ -900,27 +967,102 @@ const AdminDashboard = ({ user, onLogout }) => {
               <table className="w-full text-left border-collapse">
                 <thead>
                   <tr className="border-b border-white/5 text-white/40 text-[10px] uppercase tracking-[0.2em] font-bold">
-                    <th className="p-6">Orden</th>
-                    <th className="p-6">Cliente ID</th>
+                    <th className="p-6">Orden / Pedido</th>
+                    <th className="p-6">Cliente (Email)</th>
                     <th className="p-6">Valor Total</th>
                     <th className="p-6">Timestamp</th>
                     <th className="p-6">Estado</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/5">
-                  {dashboardData.sales.map(s => (
-                    <tr key={s.id_venta} className="hover:bg-white/[0.02] transition-colors group">
-                      <td className="p-6 text-white/20 font-mono text-xs">TRX-{s.id_venta}</td>
-                      <td className="p-6 text-white/60 font-mono text-xs">USER-{s.id_usuario}</td>
-                      <td className="p-6 font-bold text-white tracking-tight">{formatCurrency(s.total)}</td>
-                      <td className="p-6 text-white/40 text-sm">{formatDate(s.fecha)}</td>
-                      <td className="p-6">
-                        <span className="px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider bg-green-500/10 text-green-500 border border-green-500/20">
-                          Completado
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
+                  {dashboardData.sales.map(s => {
+                    const currentStatus = s.estado || 'En proceso';
+                    const clientUser = (dashboardData.users || []).find(u => String(u.id_usuario || u.id) === String(s.id_usuario));
+                    const clientEmail = s.email || clientUser?.email;
+                    const clientName = (s.nombre ? `${s.nombre} ${s.apellido || ''}` : null) || (clientUser ? `${clientUser.nombre || ''} ${clientUser.apellido || ''}` : null);
+
+                    return (
+                      <tr key={s.id_venta} className="hover:bg-white/[0.02] transition-colors group">
+                        <td className="p-6">
+                          <div className="flex items-center gap-3">
+                            <div className="w-9 h-9 rounded-2xl bg-gold-premium/10 border border-gold-premium/30 flex items-center justify-center text-gold-premium shadow-[0_0_15px_rgba(212,175,55,0.15)] group-hover:scale-105 transition-transform">
+                              <Receipt size={16} />
+                            </div>
+                            <div>
+                              <span className="font-mono text-xs font-black text-white tracking-wide block">
+                                #SG-{s.id_venta}
+                              </span>
+                              <span className="text-[9px] text-gold-premium/80 font-mono uppercase tracking-widest block mt-0.5">
+                                Venta confirmada
+                              </span>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="p-6">
+                          <div className="flex items-center gap-2.5">
+                            <div className="w-8 h-8 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center text-white/50 shrink-0">
+                              <Mail size={14} className="text-gold-premium" />
+                            </div>
+                            <div className="overflow-hidden max-w-[200px]">
+                              {clientEmail ? (
+                                <p className="font-mono text-xs font-semibold text-white/90 truncate" title={clientEmail}>
+                                  {clientEmail}
+                                </p>
+                              ) : (
+                                <p className="font-mono text-xs text-white/40 italic">
+                                  USER-{s.id_usuario || 'Anónimo'}
+                                </p>
+                              )}
+                              {clientName && clientName.trim() !== '' && (
+                                <p className="text-[10px] text-white/40 font-medium truncate">
+                                  {clientName.trim()}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                        </td>
+                        <td className="p-6 font-bold text-white tracking-tight">{formatCurrency(s.total)}</td>
+                        <td className="p-6 text-white/40 text-sm">{formatDate(s.fecha)}</td>
+                        <td className="p-6">
+                          <div className="relative inline-block">
+                            <select
+                              value={currentStatus}
+                              onChange={(e) => handleUpdateSaleStatus(s.id_venta, e.target.value)}
+                              disabled={updatingSaleStatus === s.id_venta}
+                              style={{
+                                backgroundColor: '#111',
+                                color: currentStatus === 'En proceso' ? '#f59e0b' :
+                                       currentStatus === 'En entrega' ? '#22d3ee' :
+                                       currentStatus === 'Enviado' ? '#60a5fa' :
+                                       currentStatus === 'Cancelado' ? '#ef4444' : '#4ade80'
+                              }}
+                              className={`appearance-none border rounded-xl px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider focus:outline-none cursor-pointer transition-all pr-7 ${
+                                updatingSaleStatus === s.id_venta ? 'opacity-50' : ''
+                              } ${
+                                currentStatus === 'En proceso' ? 'border-amber-500/40' :
+                                currentStatus === 'En entrega' ? 'border-cyan-500/40' :
+                                currentStatus === 'Enviado' ? 'border-blue-500/40' :
+                                currentStatus === 'Cancelado' ? 'border-red-500/40' :
+                                'border-green-500/40'
+                              }`}
+                            >
+                              <option value="En proceso" style={{ backgroundColor: '#111', color: '#f59e0b' }}>En proceso</option>
+                              <option value="En entrega" style={{ backgroundColor: '#111', color: '#22d3ee' }}>En entrega</option>
+                              <option value="Enviado" style={{ backgroundColor: '#111', color: '#60a5fa' }}>Enviado</option>
+                              <option value="Entregado" style={{ backgroundColor: '#111', color: '#4ade80' }}>Entregado</option>
+                              <option value="Cancelado" style={{ backgroundColor: '#111', color: '#ef4444' }}>Cancelado</option>
+                            </select>
+                            <div className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-white/40">
+                              {updatingSaleStatus === s.id_venta
+                                ? <RefreshCw size={10} className="animate-spin" />
+                                : <span style={{ fontSize: 8 }}>▼</span>
+                              }
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
               {dashboardData.sales.length === 0 && <div className="p-20 text-center text-white/20">Sin registros de ventas</div>}

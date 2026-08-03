@@ -3,6 +3,14 @@ import { Canvas } from '@react-three/fiber';
 import { OrbitControls, useGLTF, Environment, ContactShadows, Center } from '@react-three/drei';
 import { RefreshCw } from 'lucide-react';
 
+if (typeof window !== 'undefined') {
+  const isIgnored = (msg) => typeof msg === 'string' && (msg.includes('THREE.Clock') || msg.includes('X4122') || msg.includes('WebGLProgram'));
+  const origWarn = console.warn;
+  const origErr = console.error;
+  console.warn = (...args) => { if (!isIgnored(args[0])) origWarn(...args); };
+  console.error = (...args) => { if (!isIgnored(args[0])) origErr(...args); };
+}
+
 // Subcomponente para optimizar y renderizar el modelo GLB cargado
 const Model = ({ url }) => {
   const { scene } = useGLTF(url);

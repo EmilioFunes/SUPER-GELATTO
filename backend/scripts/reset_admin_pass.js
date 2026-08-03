@@ -32,8 +32,20 @@ async function fixPasswords() {
   const { error: err3 } = await supabase
     .from('usuario')
     .update({ password_hash: hash, rol: 'admin' })
-    .eq('email', 'admin@supergelatto.com');
-  console.log('Update admin@supergelatto.com:', err3 ? err3.message : 'OK');
+    .eq('email', 'jefe@supergelatto.com');
+  console.log('Update jefe@supergelatto.com:', err3 ? err3.message : 'OK');
+
+  const { error: err4 } = await supabase
+    .from('usuario')
+    .update({ password_hash: hash, rol: 'admin' })
+    .eq('email', 'cristianmunera979@gmail.com');
+  console.log('Update cristianmunera979@gmail.com:', err4 ? err4.message : 'OK');
+
+  const { error: err5 } = await supabase
+    .from('usuario')
+    .update({ password_hash: hash, rol: 'admin' })
+    .eq('email', 'emiliofunes28@gmail.com');
+  console.log('Update emiliofunes28@gmail.com:', err5 ? err5.message : 'OK');
 
   console.log('✅ Passwords reset successfully to: gelato1234');
 }

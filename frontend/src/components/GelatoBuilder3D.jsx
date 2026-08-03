@@ -6,15 +6,13 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { X, ShoppingCart } from 'lucide-react';
 import { useCart, formatPrice } from '../context/CartContext';
 
-// Silence THREE.Clock & DirectX X4122 shader precision warnings
+// Silence THREE.Clock, WebGLProgram & DirectX X4122 shader precision warnings
 if (typeof window !== 'undefined') {
-  const originalWarn = console.warn;
-  console.warn = (...args) => {
-    if (args[0] && typeof args[0] === 'string') {
-      if (args[0].includes('THREE.Clock') || args[0].includes('X4122')) return;
-    }
-    originalWarn(...args);
-  };
+  const isIgnored = (msg) => typeof msg === 'string' && (msg.includes('THREE.Clock') || msg.includes('X4122') || msg.includes('WebGLProgram'));
+  const origWarn = console.warn;
+  const origErr = console.error;
+  console.warn = (...args) => { if (!isIgnored(args[0])) origWarn(...args); };
+  console.error = (...args) => { if (!isIgnored(args[0])) origErr(...args); };
 }
 
 const BASE_PATH = '/360';

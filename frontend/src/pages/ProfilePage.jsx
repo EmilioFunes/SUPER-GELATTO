@@ -380,13 +380,21 @@ const ProfilePage = ({ user, onUpdateUser }) => {
                             ${(order.total || 0).toLocaleString()}
                           </td>
                           <td className="py-5 px-4 bg-white/[0.03] border-y border-white/10 group-hover:bg-white/[0.05] transition-colors">
-                            <span className={`px-4 py-1.5 rounded-full text-[9px] font-black uppercase tracking-wider flex items-center justify-center w-fit gap-1.5 ${
+                            <span className={`px-4 py-1.5 rounded-full text-[9px] font-black uppercase tracking-wider flex items-center justify-center w-fit gap-1.5 mx-auto ${
                               order.estado === 'Cancelado' ? 'bg-red-500/10 text-red-500 border border-red-500/20' : 
-                              order.estado === 'Pendiente' ? 'bg-amber-500/10 text-amber-500 border border-amber-500/20' : 
+                              order.estado === 'En proceso' || order.estado === 'Pendiente' ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' : 
+                              order.estado === 'En entrega' ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/20' : 
+                              order.estado === 'Enviado' ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20' : 
                               'bg-green-500/10 text-green-500 border border-green-500/20'
                             }`}>
-                              <span className={`w-1.5 h-1.5 rounded-full ${order.estado === 'Cancelado' ? 'bg-red-500' : order.estado === 'Pendiente' ? 'bg-amber-500' : 'bg-green-500'}`} />
-                              {order.estado || 'Entregado'}
+                              <span className={`w-1.5 h-1.5 rounded-full ${
+                                order.estado === 'Cancelado' ? 'bg-red-500' : 
+                                order.estado === 'En proceso' || order.estado === 'Pendiente' ? 'bg-amber-400' : 
+                                order.estado === 'En entrega' ? 'bg-cyan-400' : 
+                                order.estado === 'Enviado' ? 'bg-blue-400' : 
+                                'bg-green-500'
+                              }`} />
+                              {order.estado || 'En proceso'}
                             </span>
                           </td>
                           <td className="py-5 px-4 bg-white/[0.03] border-y border-r border-white/10 rounded-r-[18px] text-center group-hover:bg-white/[0.05] transition-colors">

@@ -13,6 +13,7 @@ const nodemailer = require('nodemailer');
 const bcrypt = require('bcryptjs'); // Usamos bcryptjs para mejor compatibilidad en Windows
 const jwt = require('jsonwebtoken');
 const { createClient } = require('@supabase/supabase-js');
+const { handleChatbotRequest } = require('./chatbot');
 
 
 const {
@@ -1240,12 +1241,32 @@ app.get('/api/admin/dashboard', requireAdmin, async (req, res) => {
     if (userError) throw userError;
 
     // Obtener ventas
-    const { data: sales, error: salesError } = await supabase
-      .from('venta')
-      .select('id_venta, id_usuario, total, fecha')
-      .order('fecha', { ascending: false });
+    let rawSales = [];
+    try {
+      const { data: salesData, error: salesErr } = await supabase
+        .from('venta')
+        .select('id_venta, id_usuario, total, fecha')
+        .order('fecha', { ascending: false });
+      
+      if (salesErr) {
+        console.warn('Advertencia obteniendo ventas de Supabase:', salesErr.message);
+      } else if (salesData) {
+        rawSales = salesData;
+      }
+    } catch (e) {
+      console.warn('Error al obtener ventas:', e);
+    }
 
-    if (salesError) throw salesError;
+    const sales = rawSales.map(s => {
+      const u = (users || []).find(usr => String(usr.id_usuario) === String(s.id_usuario));
+      return {
+        ...s,
+        email: u ? u.email : (s.email || null),
+        nombre: u ? u.nombre : null,
+        apellido: u ? u.apellido : null,
+        estado: s.estado || 'En proceso'
+      };
+    });
 
     // Obtener productos
     let products = [];
@@ -1304,8 +1325,12 @@ app.get('/api/admin/dashboard', requireAdmin, async (req, res) => {
   }
 });
 
+const SUPER_ADMIN_EMAIL = 'muneracristian63@gmail.com';
+
 app.delete('/api/admin/users/:id', requireAdmin, async (req, res) => {
   const { id } = req.params;
+  const requesterEmail = (req.user?.email || '').toLowerCase();
+
   try {
     const { data: targetUser } = await supabase.from('usuario').select('*').eq('id_usuario', id).single();
 
@@ -1313,13 +1338,22 @@ app.delete('/api/admin/users/:id', requireAdmin, async (req, res) => {
       return res.status(404).json({ message: 'Usuario no encontrado.' });
     }
 
-    if (targetUser.rol === 'admin') {
-      return res.status(403).json({ message: 'Acceso denegado. No está permitido eliminar cuentas de administrador.' });
+    // No se permite eliminar la cuenta principal de super administrador
+    if ((targetUser.email || '').toLowerCase() === SUPER_ADMIN_EMAIL) {
+      return res.status(403).json({ message: 'Acceso denegado. La cuenta principal de super administrador está protegida y no se puede eliminar.' });
+    }
+
+    // Si el usuario a eliminar es un administrador:
+    // Solo el super administrador (muneracristian63@gmail.com) puede eliminarlo.
+    if (targetUser.rol === 'admin' && requesterEmail !== SUPER_ADMIN_EMAIL) {
+      return res.status(403).json({ 
+        message: 'Acceso denegado. Solo la cuenta principal de super administrador (muneracristian63@gmail.com) puede eliminar usuarios administradores.' 
+      });
     }
 
     const { error } = await supabase.from('usuario').delete().eq('id_usuario', id);
     if (error) throw error;
-    return res.status(200).json({ message: 'Cuenta de cliente eliminada correctamente.' });
+    return res.status(200).json({ message: 'Usuario eliminado correctamente.' });
   } catch (error) {
     console.error('Error al eliminar usuario:', error);
     return res.status(500).json({ message: 'Error al eliminar usuario.' });
@@ -1329,18 +1363,71 @@ app.delete('/api/admin/users/:id', requireAdmin, async (req, res) => {
 app.put('/api/admin/users/:id/role', requireAdmin, async (req, res) => {
   const { id } = req.params;
   const { rol } = req.body;
+  const requesterEmail = (req.user?.email || '').toLowerCase();
 
   if (!rol || !['admin', 'cliente'].includes(rol)) {
     return res.status(400).json({ message: 'Rol no válido.' });
   }
 
   try {
+    const { data: targetUser } = await supabase.from('usuario').select('*').eq('id_usuario', id).single();
+
+    if (!targetUser) {
+      return res.status(404).json({ message: 'Usuario no encontrado.' });
+    }
+
+    // No se puede modificar el rol de la cuenta principal de super administrador
+    if ((targetUser.email || '').toLowerCase() === SUPER_ADMIN_EMAIL) {
+      return res.status(403).json({ message: 'Acceso denegado. No se puede modificar el rol de la cuenta principal de super administrador.' });
+    }
+
+    // Si el usuario objetivo es administrador y se intenta bajar a cliente:
+    // Solo el super administrador (muneracristian63@gmail.com) puede realizar el cambio.
+    if (targetUser.rol === 'admin' && rol === 'cliente' && requesterEmail !== SUPER_ADMIN_EMAIL) {
+      return res.status(403).json({ 
+        message: 'Acceso denegado. Solo la cuenta de super administrador principal (muneracristian63@gmail.com) puede bajar de categoría a los administradores a cliente.' 
+      });
+    }
+
     const { error } = await supabase.from('usuario').update({ rol }).eq('id_usuario', id);
     if (error) throw error;
     return res.status(200).json({ message: 'Rol de usuario actualizado correctamente.', id, rol });
   } catch (error) {
     console.error('Error al actualizar rol de usuario:', error);
     return res.status(500).json({ message: 'Error al actualizar el rol del usuario.' });
+  }
+});
+
+// Endpoint para actualizar el estado de una venta (orden)
+app.put('/api/admin/sales/:id/status', requireAdmin, async (req, res) => {
+  const { id } = req.params;
+  const { estado } = req.body;
+
+  const validStatuses = ['En proceso', 'En entrega', 'Enviado', 'Entregado', 'Completado', 'Cancelado'];
+  if (!estado || !validStatuses.includes(estado)) {
+    return res.status(400).json({ message: 'Estado de venta no válido.' });
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('venta')
+      .update({ estado })
+      .eq('id_venta', id)
+      .select()
+      .single();
+
+    if (error) {
+      console.warn('Advertencia al actualizar estado en Supabase:', error.message);
+    }
+
+    return res.status(200).json({
+      message: 'Estado de venta actualizado correctamente.',
+      id_venta: id,
+      estado
+    });
+  } catch (error) {
+    console.error('Error al actualizar el estado de la venta:', error);
+    return res.status(500).json({ message: 'Error al actualizar el estado de la venta.' });
   }
 });
 

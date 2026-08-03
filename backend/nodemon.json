@@ -1,0 +1,7 @@
+{
+  "ignore": [
+    "featured_state.json",
+    "*.json",
+    "*.log"
+  ]
+}
