@@ -33,11 +33,25 @@ const ProductsPage = ({ user }) => {
         setLoading(false);
       }
     };
+
     fetchProducts();
+
+    const handleProductsUpdated = () => {
+      fetchProducts();
+    };
+
+    window.addEventListener('products-updated', handleProductsUpdated);
+    return () => {
+      window.removeEventListener('products-updated', handleProductsUpdated);
+    };
   }, []);
 
   const handleQuickAdd = (flavor, e) => {
     e.stopPropagation();
+    if (flavor.stock === 0) {
+      alert('¡Lo sentimos! Este sabor está actualmente agotado. 🍦');
+      return;
+    }
     if (!user?.id) {
       alert('¡Vaya! Necesitas una cuenta registrada para realizar pedidos. Te llevamos al registro 🍦');
       navigate('/register');
@@ -220,9 +234,22 @@ const ProductsPage = ({ user }) => {
                   <div className="absolute inset-0 bg-gradient-to-t from-background-card/90 via-transparent to-transparent" />
 
                   {/* Badge */}
-                  <span className={`absolute top-3 left-3 text-[9px] font-bold uppercase tracking-widest px-2.5 py-1 rounded-full border backdrop-blur-sm ${flavor.badgeColor}`}>
-                    {flavor.badge}
-                  </span>
+                  <div className="absolute top-3 left-3 flex flex-col gap-1 items-start">
+                    <span className={`text-[9px] font-bold uppercase tracking-widest px-2.5 py-1 rounded-full border backdrop-blur-sm ${flavor.badgeColor}`}>
+                      {flavor.badge}
+                    </span>
+                    {flavor.stock !== undefined && (
+                      <span className={`text-[8px] font-bold tracking-wider px-2 py-0.5 rounded-full border backdrop-blur-sm ${
+                        flavor.stock === 0 
+                          ? 'bg-red-500/80 text-white border-red-400/50' 
+                          : flavor.stock <= 15 
+                          ? 'bg-amber-500/80 text-black border-amber-400/50' 
+                          : 'bg-black/60 text-white/80 border-white/20'
+                      }`}>
+                        {flavor.stock === 0 ? 'Agotado' : `${flavor.stock} disp.`}
+                      </span>
+                    )}
+                  </div>
 
                   {/* Price */}
                   <span className="absolute top-3 right-3 text-xs font-bold text-gold-premium bg-background-dark/70 backdrop-blur-sm px-2.5 py-1 rounded-full border border-white/10">

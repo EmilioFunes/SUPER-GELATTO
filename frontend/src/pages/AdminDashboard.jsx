@@ -3,8 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { 
   Users, ShoppingBag, IceCream, Trash2, Shield, Plus, 
   RefreshCw, AlertTriangle, Box, Sparkles, Key, CheckCircle, 
-  X, Camera, Loader2, ArrowRight, Star, Image, Upload, Eye,
-  Mail, Receipt
+  X, Camera, Loader2, Star, Image, Upload, Eye,
+  Mail, Receipt, Edit2, Save, CheckCircle2
 } from 'lucide-react';
 import Model3DPreview from '../components/Model3DPreview';
 import CapturaFacial from '../components/CapturaFacial';
@@ -16,6 +16,9 @@ const AdminDashboard = ({ user, onLogout }) => {
   const [error, setError] = useState(null);
   const [activeTab, setActiveTab] = useState('users');
   const [actionLoading, setActionLoading] = useState(null);
+  const [editingProduct, setEditingProduct] = useState(null);
+  const [editFormData, setEditFormData] = useState({ name: '', precio: 0, stock: 50, categoria: '', desc: '' });
+  const [saveSuccess, setSaveSuccess] = useState(false);
   const navigate = useNavigate();
 
   // --- Verificación de Admin: Si ya está autenticado como admin, acceso directo sin re-verificación ---
@@ -496,8 +499,6 @@ const AdminDashboard = ({ user, onLogout }) => {
     }
   };
 
-
-
   // Crear producto y disparar Tripo AI
   const handleCreateProduct = async (e) => {
     e.preventDefault();
@@ -661,6 +662,87 @@ const AdminDashboard = ({ user, onLogout }) => {
     }
   };
 
+  const handleOpenEditProduct = (prod) => {
+    setEditingProduct(prod);
+    setEditFormData({
+      name: prod.name || '',
+      precio: prod.precio || prod.price || 0,
+      stock: prod.stock !== undefined ? prod.stock : 50,
+      categoria: prod.categoria || 'Clásico',
+      desc: prod.desc || ''
+    });
+  };
+
+  const handleQuickStockChange = async (productId, newStockVal) => {
+    const stockNum = Math.max(0, parseInt(newStockVal, 10) || 0);
+
+    // Actualización optimista instantánea en interfaz
+    setDashboardData(prev => ({
+      ...prev,
+      products: prev.products.map(p => p.id === productId ? { ...p, stock: stockNum } : p)
+    }));
+
+    try {
+      const res = await fetch(`/api/admin/products/${productId}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-User-Role': user?.rol || ''
+        },
+        body: JSON.stringify({ stock: stockNum })
+      });
+
+      if (!res.ok) throw new Error('Error al actualizar stock');
+      window.dispatchEvent(new CustomEvent('products-updated'));
+    } catch (err) {
+      console.error('Error al guardar stock en Supabase:', err);
+    }
+  };
+
+  const handleSaveProduct = async (e) => {
+    e.preventDefault();
+    if (!editingProduct) return;
+
+    setActionLoading(editingProduct.id);
+    try {
+      const res = await fetch(`/api/admin/products/${editingProduct.id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-User-Role': user?.rol || ''
+        },
+        body: JSON.stringify(editFormData)
+      });
+
+      if (!res.ok) throw new Error('Error al actualizar el producto');
+
+      setDashboardData(prev => ({
+        ...prev,
+        products: prev.products.map(p => p.id === editingProduct.id ? {
+          ...p,
+          name: editFormData.name,
+          precio: editFormData.precio,
+          price: editFormData.precio,
+          stock: editFormData.stock,
+          categoria: editFormData.categoria,
+          desc: editFormData.desc
+        } : p)
+      }));
+
+      window.dispatchEvent(new CustomEvent('products-updated'));
+
+      setSaveSuccess(true);
+      setTimeout(() => {
+        setSaveSuccess(false);
+        setEditingProduct(null);
+      }, 800);
+    } catch (err) {
+      alert(err.message || 'Error al guardar cambios');
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
   const formatCurrency = (amount) => {
     return new Intl.NumberFormat('es-CO', {
       style: 'currency',
@@ -746,7 +828,7 @@ const AdminDashboard = ({ user, onLogout }) => {
           {[
             { id: 'users', label: 'Usuarios', icon: Users },
             { id: 'sales', label: 'Ventas', icon: ShoppingBag },
-            { id: 'products', label: 'Catálogo', icon: IceCream },
+            { id: 'products', label: 'Catálogo & Stock', icon: IceCream },
             { id: 'featured', label: 'Destacados', icon: Star },
             { id: 'generator_3d', label: 'Generador 3D', icon: Box },
             { id: 'security', label: 'Seguridad', icon: Key },
@@ -1096,141 +1178,175 @@ const AdminDashboard = ({ user, onLogout }) => {
                     <th className="p-6">SKU</th>
                     <th className="p-6">Sabor / Producto</th>
                     <th className="p-6">Precio</th>
+                    <th className="p-6">Stock / Disponible</th>
                     <th className="p-6">Categoría</th>
                     <th className="p-6">Destacado</th>
                     <th className="p-6 text-right">Acciones</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/5">
-                  {dashboardData.products.map(p => (
-                    <tr key={p.id} className="hover:bg-white/[0.02] transition-colors group">
-                      <td className="p-6 text-white/20 font-mono text-xs">PROD-{p.id}</td>
-                      <td className="p-6">
-                        <div className="flex items-center gap-4">
-                          <div className="relative group/img cursor-pointer" onClick={() => handleOpenImageModal(p)}>
-                            <img src={p.image} alt="" className="w-12 h-12 rounded-xl object-cover border border-white/10 group-hover/img:brightness-75 transition-all" />
-                            <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover/img:opacity-100 transition-opacity bg-black/40 rounded-xl">
-                              <Camera size={14} className="text-white" />
+                  {dashboardData.products.map(p => {
+                    const currentStock = p.stock !== undefined ? p.stock : 50;
+                    let stockBadge = 'bg-green-500/10 text-green-400 border-green-500/20';
+                    if (currentStock === 0) {
+                      stockBadge = 'bg-red-500/10 text-red-400 border-red-500/20';
+                    } else if (currentStock <= 15) {
+                      stockBadge = 'bg-amber-500/10 text-amber-400 border-amber-500/20';
+                    }
+
+                    return (
+                      <tr key={p.id} className="hover:bg-white/[0.02] transition-colors group">
+                        <td className="p-6 text-white/20 font-mono text-xs">PROD-{p.id}</td>
+                        <td className="p-6">
+                          <div className="flex items-center gap-4">
+                            <div className="relative group/img cursor-pointer" onClick={() => handleOpenImageModal(p)}>
+                              <img src={p.image} alt="" className="w-12 h-12 rounded-xl object-cover border border-white/10 group-hover/img:brightness-75 transition-all" />
+                              <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover/img:opacity-100 transition-opacity bg-black/40 rounded-xl">
+                                <Camera size={14} className="text-white" />
+                              </div>
+                            </div>
+                            <div>
+                              <p className="font-medium text-white flex items-center gap-2">
+                                {p.name}
+                                {p.destacado && (
+                                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-gold-premium/20 text-gold-premium border border-gold-premium/30 font-bold flex items-center gap-1">
+                                    <Star size={10} className="fill-gold-premium" /> Destacado
+                                  </span>
+                                )}
+                              </p>
+                              <p className="text-[10px] text-white/40 line-clamp-1 max-w-[220px]">{p.desc}</p>
                             </div>
                           </div>
-                          <div>
-                            <p className="font-medium text-white flex items-center gap-2">
-                              {p.name}
-                              {p.destacado && (
-                                <span className="text-[10px] px-2 py-0.5 rounded-full bg-gold-premium/20 text-gold-premium border border-gold-premium/30 font-bold flex items-center gap-1">
-                                  <Star size={10} className="fill-gold-premium" /> Destacado
-                                </span>
-                              )}
-                            </p>
-                            <p className="text-[10px] text-white/40 line-clamp-1 max-w-[220px]">{p.desc}</p>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="p-4">
-                        {editingPrice && String(editingPrice.id) === String(p.id) ? (
-                          <div className="flex items-center gap-1">
-                            <span className="text-white/40 text-xs">$</span>
-                            <input
-                              type="number"
-                              autoFocus
-                              value={editingPrice.value}
-                              onChange={(e) => setEditingPrice({ id: p.id, value: e.target.value })}
-                              onBlur={() => handleSavePrice(p.id)}
-                              onKeyDown={(e) => {
-                                if (e.key === 'Enter') handleSavePrice(p.id);
-                                if (e.key === 'Escape') setEditingPrice(null);
-                              }}
-                              className="w-24 bg-[#1a1a1a] border border-gold-premium/40 rounded-lg px-2 py-1 text-gold-premium font-bold text-xs focus:outline-none focus:border-gold-premium"
+                        </td>
+                        <td className="p-4">
+                          {editingPrice && String(editingPrice.id) === String(p.id) ? (
+                            <div className="flex items-center gap-1">
+                              <span className="text-white/40 text-xs">$</span>
+                              <input
+                                type="number"
+                                autoFocus
+                                value={editingPrice.value}
+                                onChange={(e) => setEditingPrice({ id: p.id, value: e.target.value })}
+                                onBlur={() => handleSavePrice(p.id)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') handleSavePrice(p.id);
+                                  if (e.key === 'Escape') setEditingPrice(null);
+                                }}
+                                className="w-24 bg-[#1a1a1a] border border-gold-premium/40 rounded-lg px-2 py-1 text-gold-premium font-bold text-xs focus:outline-none focus:border-gold-premium"
+                              />
+                            </div>
+                          ) : (
+                            <button
+                              onClick={() => setEditingPrice({ id: p.id, value: p.precio })}
+                              className="group/price flex items-center gap-1.5 font-bold text-gold-premium tracking-tight hover:text-amber-300 transition-colors cursor-pointer"
+                              title="Haz clic para editar el precio"
+                            >
+                              {updatingPrice === p.id ? <RefreshCw size={12} className="animate-spin text-gold-premium" /> : null}
+                              {formatCurrency(p.precio)}
+                              <span className="opacity-0 group-hover/price:opacity-100 text-[9px] text-white/30 transition-opacity">✏️</span>
+                            </button>
+                          )}
+                        </td>
+                        <td className="p-6">
+                          <div className="flex items-center gap-1.5">
+                            <button 
+                              type="button"
+                              onClick={() => handleQuickStockChange(p.id, currentStock - 1)}
+                              disabled={currentStock <= 0}
+                              title="Reducir 1 unidad"
+                              className="w-7 h-7 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center text-white/60 hover:text-white hover:bg-white/10 active:scale-95 transition-all text-xs font-bold disabled:opacity-30"
+                            >
+                              -
+                            </button>
+                            <input 
+                              type="number" 
+                              min="0"
+                              value={currentStock}
+                              onChange={(e) => handleQuickStockChange(p.id, e.target.value)}
+                              title="Editar stock directamente"
+                              className="w-16 px-2 py-1 bg-black/60 border border-gold-premium/30 rounded-lg text-center font-bold text-xs text-gold-premium focus:outline-none focus:border-gold-premium"
                             />
+                            <button 
+                              type="button"
+                              onClick={() => handleQuickStockChange(p.id, currentStock + 1)}
+                              title="Aumentar 1 unidad"
+                              className="w-7 h-7 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center text-white/60 hover:text-white hover:bg-white/10 active:scale-95 transition-all text-xs font-bold"
+                            >
+                              +
+                            </button>
+                            <span className={`ml-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold tracking-wider border ${stockBadge}`}>
+                              {currentStock === 0 ? 'Agotado' : currentStock <= 15 ? 'Poco' : 'OK'}
+                            </span>
                           </div>
-                        ) : (
+                        </td>
+                        <td className="p-4">
+                          <div className="relative">
+                            <select
+                              value={p.categoria || 'Clásico'}
+                              onChange={(e) => handleUpdateCategory(p.id, e.target.value)}
+                              disabled={updatingCategory === p.id}
+                              style={{ backgroundColor: '#111', color: p.categoria === 'Vegano' ? '#86efac' : p.categoria === 'Temporada' ? '#f9a8d4' : p.categoria === 'Gourmet' ? '#c4b5fd' : '#D4AF37' }}
+                              className={`appearance-none border rounded-xl px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider focus:outline-none cursor-pointer transition-all pr-7 ${
+                                updatingCategory === p.id ? 'opacity-50' : ''
+                              }`}
+                            >
+                              <option value="Clásico" style={{backgroundColor:'#111',color:'#D4AF37'}}>Clásico</option>
+                              <option value="Vegano" style={{backgroundColor:'#111',color:'#86efac'}}>Vegano</option>
+                              <option value="Temporada" style={{backgroundColor:'#111',color:'#f9a8d4'}}>Temporada</option>
+                              <option value="Gourmet" style={{backgroundColor:'#111',color:'#c4b5fd'}}>Gourmet</option>
+                            </select>
+                          </div>
+                        </td>
+                        <td className="p-6">
                           <button
-                            onClick={() => setEditingPrice({ id: p.id, value: p.precio })}
-                            className="group/price flex items-center gap-1.5 font-bold text-gold-premium tracking-tight hover:text-amber-300 transition-colors cursor-pointer"
-                            title="Haz clic para editar el precio"
-                          >
-                            {updatingPrice === p.id
-                              ? <RefreshCw size={12} className="animate-spin text-gold-premium" />
-                              : null
-                            }
-                            {formatCurrency(p.precio)}
-                            <span className="opacity-0 group-hover/price:opacity-100 text-[9px] text-white/30 transition-opacity">✏️</span>
-                          </button>
-                        )}
-                      </td>
-                      <td className="p-4">
-                        <div className="relative">
-                          <select
-                            value={p.categoria || 'Clásico'}
-                            onChange={(e) => handleUpdateCategory(p.id, e.target.value)}
-                            disabled={updatingCategory === p.id}
-                            style={{ backgroundColor: '#111', color: p.categoria === 'Vegano' ? '#86efac' : p.categoria === 'Temporada' ? '#f9a8d4' : p.categoria === 'Gourmet' ? '#c4b5fd' : '#D4AF37' }}
-                            className={`appearance-none border rounded-xl px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider focus:outline-none cursor-pointer transition-all pr-7 ${
-                              updatingCategory === p.id ? 'opacity-50' : ''
-                            } ${
-                              (p.categoria === 'Vegano') ? 'border-green-500/30' :
-                              (p.categoria === 'Temporada') ? 'border-pink-400/30' :
-                              (p.categoria === 'Gourmet') ? 'border-purple-400/30' :
-                              'border-gold-premium/30'
+                            onClick={() => handleToggleFeatured(p.id, p.destacado)}
+                            disabled={togglingFeatured === p.id}
+                            className={`px-3 py-1.5 rounded-xl text-[10px] font-bold uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer ${
+                              p.destacado
+                                ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30 hover:bg-amber-500/30 shadow-[0_0_10px_rgba(245,158,11,0.2)]'
+                                : 'bg-white/5 text-white/40 border border-white/10 hover:text-white hover:bg-white/10'
                             }`}
                           >
-                            <option value="Clásico" style={{backgroundColor:'#111',color:'#D4AF37'}}>Clásico</option>
-                            <option value="Vegano" style={{backgroundColor:'#111',color:'#86efac'}}>Vegano</option>
-                            <option value="Temporada" style={{backgroundColor:'#111',color:'#f9a8d4'}}>Temporada</option>
-                            <option value="Gourmet" style={{backgroundColor:'#111',color:'#c4b5fd'}}>Gourmet</option>
-                          </select>
-                          <div className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-white/30">
-                            {updatingCategory === p.id
-                              ? <RefreshCw size={10} className="animate-spin" />
-                              : <span style={{fontSize:8}}>▼</span>
-                            }
+                            <Star size={12} className={p.destacado ? 'fill-amber-400' : ''} />
+                            {p.destacado ? 'Destacado' : 'Destacar'}
+                          </button>
+                        </td>
+                        <td className="p-6 text-right">
+                          <div className="flex items-center justify-end gap-2">
+                            <button
+                              onClick={() => handleOpenEditProduct(p)}
+                              title="Editar Producto y Stock"
+                              className="p-2 text-white/40 hover:text-gold-premium hover:bg-gold-premium/10 rounded-lg transition-all"
+                            >
+                              <Edit2 size={18} />
+                            </button>
+                            <button
+                              onClick={() => handleOpenImageModal(p)}
+                              className="px-3 py-1.5 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/20 text-blue-400 text-[10px] font-bold tracking-wider uppercase rounded-lg flex items-center gap-1.5 transition-all cursor-pointer"
+                              title="Cambiar la imagen de este producto"
+                            >
+                              <Image size={12} />
+                              Imagen
+                            </button>
+                            <button
+                              onClick={() => handleOpen3DModal(p)}
+                              className="px-3 py-1.5 bg-gold-premium/10 hover:bg-gold-premium/20 border border-gold-premium/20 text-gold-premium text-[10px] font-bold tracking-wider uppercase rounded-lg flex items-center gap-1.5 transition-all cursor-pointer"
+                            >
+                              <Box size={12} />
+                              Modelo 3D
+                            </button>
+                            <button 
+                              disabled={actionLoading === p.id}
+                              onClick={() => handleDeleteProduct(p.id)}
+                              className="p-2 text-white/20 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all cursor-pointer"
+                            >
+                              {actionLoading === p.id ? <RefreshCw className="animate-spin" size={18} /> : <Trash2 size={18} />}
+                            </button>
                           </div>
-                        </div>
-                      </td>
-                      <td className="p-6">
-                        <button
-                          onClick={() => handleToggleFeatured(p.id, p.destacado)}
-                          disabled={togglingFeatured === p.id}
-                          className={`px-3 py-1.5 rounded-xl text-[10px] font-bold uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer ${
-                            p.destacado
-                              ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30 hover:bg-amber-500/30 shadow-[0_0_10px_rgba(245,158,11,0.2)]'
-                              : 'bg-white/5 text-white/40 border border-white/10 hover:text-white hover:bg-white/10'
-                          }`}
-                        >
-                          <Star size={12} className={p.destacado ? 'fill-amber-400' : ''} />
-                          {p.destacado ? 'Destacado' : 'Destacar'}
-                        </button>
-                      </td>
-                      <td className="p-6 text-right">
-                        <div className="flex items-center justify-end gap-2">
-                          <button
-                            onClick={() => handleOpenImageModal(p)}
-                            className="px-3 py-1.5 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/20 text-blue-400 text-[10px] font-bold tracking-wider uppercase rounded-lg flex items-center gap-1.5 transition-all cursor-pointer"
-                            title="Cambiar la imagen de este producto"
-                          >
-                            <Image size={12} />
-                            Imagen
-                          </button>
-
-                          <button
-                            onClick={() => handleOpen3DModal(p)}
-                            className="px-3 py-1.5 bg-gold-premium/10 hover:bg-gold-premium/20 border border-gold-premium/20 text-gold-premium text-[10px] font-bold tracking-wider uppercase rounded-lg flex items-center gap-1.5 transition-all cursor-pointer"
-                          >
-                            <Box size={12} />
-                            Modelo 3D
-                          </button>
-                          
-                          <button 
-                            disabled={actionLoading === p.id}
-                            onClick={() => handleDeleteProduct(p.id)}
-                            className="p-2 text-white/20 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all cursor-pointer"
-                          >
-                            {actionLoading === p.id ? <RefreshCw className="animate-spin" size={18} /> : <Trash2 size={18} />}
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
               {dashboardData.products.length === 0 && <div className="p-20 text-center text-white/20">No hay productos en el catálogo</div>}
@@ -1703,8 +1819,6 @@ const AdminDashboard = ({ user, onLogout }) => {
         </div>
       )}
 
-
-
       {/* --- MODAL PARA GESTIÓN Y CAMBIO DE IMAGEN DE PRODUCTO --- */}
       {imageModalProduct && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
@@ -1974,6 +2088,118 @@ const AdminDashboard = ({ user, onLogout }) => {
                 >
                   {createProductLoading ? <RefreshCw className="animate-spin" size={16} /> : <Plus size={16} />}
                   Crear Producto
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* EDIT PRODUCT & STOCK MODAL */}
+      {editingProduct && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-200">
+          <div className="relative w-full max-w-lg bg-[#0d0d0d] border border-gold-premium/30 rounded-3xl p-8 shadow-[0_0_50px_rgba(212,175,55,0.15)]">
+            <button 
+              onClick={() => setEditingProduct(null)}
+              className="absolute top-6 right-6 p-2 text-white/40 hover:text-white hover:bg-white/5 rounded-full transition-colors"
+            >
+              <X size={20} />
+            </button>
+
+            <div className="flex items-center gap-3 mb-6 border-b border-white/10 pb-4">
+              <IceCream className="text-gold-premium" size={24} />
+              <div>
+                <h3 className="text-xl font-light text-white">Modificar Producto & Stock</h3>
+                <p className="text-xs text-white/40">PROD-{editingProduct.id} — Sincronización Supabase</p>
+              </div>
+            </div>
+
+            <form onSubmit={handleSaveProduct} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-white/50 mb-1">Nombre del Producto</label>
+                <input 
+                  type="text" 
+                  value={editFormData.name} 
+                  onChange={(e) => setEditFormData({ ...editFormData, name: e.target.value })}
+                  className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white focus:outline-none focus:border-gold-premium"
+                  required
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-white/50 mb-1">Precio (COP)</label>
+                  <input 
+                    type="number" 
+                    value={editFormData.precio} 
+                    onChange={(e) => setEditFormData({ ...editFormData, precio: Number(e.target.value) })}
+                    className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white focus:outline-none focus:border-gold-premium"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-gold-premium mb-1">Stock Disponible</label>
+                  <input 
+                    type="number" 
+                    min="0"
+                    value={editFormData.stock} 
+                    onChange={(e) => setEditFormData({ ...editFormData, stock: Number(e.target.value) })}
+                    className="w-full px-4 py-3 bg-gold-premium/10 border border-gold-premium/40 rounded-xl text-white font-bold focus:outline-none focus:border-gold-premium"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-white/50 mb-1">Categoría</label>
+                <select 
+                  value={editFormData.categoria} 
+                  onChange={(e) => setEditFormData({ ...editFormData, categoria: e.target.value })}
+                  className="w-full px-4 py-3 bg-[#151515] border border-white/10 rounded-xl text-white focus:outline-none focus:border-gold-premium"
+                >
+                  <option value="Clásico">Clásico</option>
+                  <option value="Vegano">Vegano</option>
+                  <option value="Temporada">Temporada</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-white/50 mb-1">Descripción Breve</label>
+                <textarea 
+                  rows="3"
+                  value={editFormData.desc} 
+                  onChange={(e) => setEditFormData({ ...editFormData, desc: e.target.value })}
+                  className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white focus:outline-none focus:border-gold-premium"
+                />
+              </div>
+
+              <div className="pt-4 flex items-center justify-end gap-3 border-t border-white/10">
+                <button 
+                  type="button" 
+                  onClick={() => setEditingProduct(null)}
+                  className="px-6 py-3 bg-white/5 text-white/60 hover:text-white rounded-xl text-sm font-medium transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button 
+                  type="submit" 
+                  disabled={actionLoading === editingProduct.id}
+                  className="flex items-center gap-2 px-8 py-3 bg-gold-premium text-black font-semibold rounded-xl text-sm hover:scale-105 transition-transform shadow-[0_0_20px_rgba(212,175,55,0.3)]"
+                >
+                  {saveSuccess ? (
+                    <>
+                      <CheckCircle2 size={18} /> ¡Guardado!
+                    </>
+                  ) : actionLoading === editingProduct.id ? (
+                    <>
+                      <RefreshCw className="animate-spin" size={18} /> Guardando...
+                    </>
+                  ) : (
+                    <>
+                      <Save size={18} /> Guardar Cambios
+                    </>
+                  )}
                 </button>
               </div>
             </form>
