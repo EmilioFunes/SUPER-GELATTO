@@ -6,13 +6,13 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { X, ShoppingCart } from 'lucide-react';
 import { useCart, formatPrice } from '../context/CartContext';
 
-// Silence THREE.Clock deprecation warning if it persists in the environment
+// Silence THREE.Clock, WebGLProgram & DirectX X4122 shader precision warnings
 if (typeof window !== 'undefined') {
-  const originalWarn = console.warn;
-  console.warn = (...args) => {
-    if (args[0] && typeof args[0] === 'string' && args[0].includes('THREE.Clock')) return;
-    originalWarn(...args);
-  };
+  const isIgnored = (msg) => typeof msg === 'string' && (msg.includes('THREE.Clock') || msg.includes('X4122') || msg.includes('WebGLProgram'));
+  const origWarn = console.warn;
+  const origErr = console.error;
+  console.warn = (...args) => { if (!isIgnored(args[0])) origWarn(...args); };
+  console.error = (...args) => { if (!isIgnored(args[0])) origErr(...args); };
 }
 
 const BASE_PATH = '/360';
@@ -220,9 +220,15 @@ const MemoizedCanvas = React.memo(({ container, selectedScoops, selectedToppings
   return (
     <Canvas
       ref={canvasRef}
+      dpr={[1, 1.5]}
       camera={{ position: [0, 3, 8], fov: 40 }}
       style={{ width: '100%', height: '100%', minHeight: '500px' }}
       gl={{ antialias: true, alpha: true, preserveDrawingBuffer: true }}
+      onCreated={({ gl }) => {
+        gl.domElement.addEventListener('webglcontextlost', (e) => {
+          e.preventDefault();
+        });
+      }}
     >
       <GelatoScene 
         container={container} 

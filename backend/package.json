@@ -8,14 +8,16 @@
     "dev": "nodemon server.js"
   },
   "dependencies": {
-    "@google/generative-ai": "^0.24.1",
+    "@aws-sdk/client-rekognition": "^3.1099.0",
+    "@simplewebauthn/server": "^13.3.2",
     "@supabase/supabase-js": "^2.39.3",
     "bcryptjs": "^2.4.3",
-    "body-parser": "^1.20.2",
+    "compression": "^1.8.1",
     "cors": "^2.8.5",
     "dotenv": "^17.3.1",
     "express": "^4.18.2",
     "groq-sdk": "^1.2.0",
+    "jsonwebtoken": "^9.0.3",
     "nodemailer": "^8.0.2"
   },
   "devDependencies": {

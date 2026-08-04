@@ -19,7 +19,15 @@ const CheckoutPage = ({ user }) => {
 
   const validateField = (name, value) => {
     let error = '';
-    if (name === 'fullName' && value.trim().length < 3) error = 'Nombre demasiado corto.';
+    if (name === 'fullName') {
+      if (value.trim().length < 3) {
+        error = 'Nombre demasiado corto.';
+      } else if (/^\s/.test(value) || value !== value.trim()) {
+        error = 'No puede tener espacios al inicio ni al final.';
+      } else if (/\s{2,}/.test(value)) {
+        error = 'Solo se permite un espacio sencillo entre palabras.';
+      }
+    }
     if (name === 'phone' && !/^\+?[0-9\s-]{7,15}$/.test(value)) error = 'Teléfono inválido.';
     if (name === 'address' && value.trim().length < 5) error = 'Dirección insuficiente.';
     setErrors(prev => ({ ...prev, [name]: error }));
@@ -33,6 +41,9 @@ const CheckoutPage = ({ user }) => {
 
   const isFormValid = 
     formData.fullName.trim().length >= 3 && 
+    !/^\s/.test(formData.fullName) &&
+    formData.fullName === formData.fullName.trim() &&
+    !/\s{2,}/.test(formData.fullName) &&
     /^\+?[0-9\s-]{7,15}$/.test(formData.phone) && 
     formData.address.trim().length >= 5 &&
     Object.values(errors).every(x => x === '');
@@ -46,7 +57,7 @@ const CheckoutPage = ({ user }) => {
     e.preventDefault();
     setIsProcessing(true);
     try {
-      const response = await fetch('/api/orders', {
+      const response = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/orders`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 

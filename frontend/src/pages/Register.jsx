@@ -32,14 +32,16 @@ function Register() {
           error = 'El nombre es obligatorio.';
         } else if (/^\s/.test(value) || value !== value.trim()) {
           error = 'No puede tener espacios al inicio ni al final.';
+        } else if (/\s{2,}/.test(value)) {
+          error = 'Solo se permite un espacio sencillo entre palabras.';
         }
       }
       
       if (name === 'email') {
         if (/\s/.test(value)) {
           error = 'El correo no puede tener espacios.';
-        } else if (!/^[^\s@]+@[^\s@]+\.(com|net|edu)$/i.test(value)) {
-          error = 'Email inválido (debe terminar en .com, .net o .edu).';
+        } else if (!/^[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.(com|net|edu)$/i.test(value)) {
+          error = 'Email inválido (sin caracteres especiales y debe terminar en .com, .net o .edu).';
         }
       }
       
@@ -81,8 +83,9 @@ function Register() {
   const isFormValid = 
     formData.name && 
     formData.name === formData.name.trim() &&
+    !/\s{2,}/.test(formData.name) &&
     formData.email && 
-    /^[^\s@]+@[^\s@]+\.(com|net|edu)$/i.test(formData.email) &&
+    /^[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.(com|net|edu)$/i.test(formData.email) &&
     !/\s/.test(formData.email) &&
     !/[<>&"'\/]/.test(formData.email) &&
     !/[<>&"'\/]/.test(formData.name) &&
@@ -104,7 +107,7 @@ function Register() {
     setErrors({});
 
     try {
-      const res = await fetch('/api/register', {
+      const res = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(formData),
@@ -112,7 +115,7 @@ function Register() {
 
       const data = await res.json();
 
-      if (!res.ok) {
+      if (!res.ok || data.ok === false) {
         setErrors({ server: data.message || 'Error al registrarse.' });
         setLoading(false);
         return;

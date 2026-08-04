@@ -38,13 +38,15 @@ const ProfilePage = ({ user, onUpdateUser }) => {
           error = 'Nombre demasiado corto.';
         } else if (/^\s/.test(value) || value !== value.trim()) {
           error = 'No puede tener espacios al inicio ni al final.';
+        } else if (/\s{2,}/.test(value)) {
+          error = 'Solo se permite un espacio sencillo entre palabras.';
         }
       }
       if (name === 'email') {
         if (/\s/.test(value)) {
           error = 'El correo no puede tener espacios.';
-        } else if (!/^[^\s@]+@[^\s@]+\.(com|net|edu)$/i.test(value)) {
-          error = 'Email inválido (debe terminar en .com, .net o .edu).';
+        } else if (!/^[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.(com|net|edu)$/i.test(value)) {
+          error = 'Email inválido (sin caracteres especiales y debe terminar en .com, .net o .edu).';
         }
       }
     }
@@ -53,7 +55,8 @@ const ProfilePage = ({ user, onUpdateUser }) => {
 
   const isFormValid = editName && 
                       editName.trim().length >= 3 && 
-                      /^[^\s@]+@[^\s@]+\.(com|net|edu)$/i.test(editEmail) && 
+                      !/\s{2,}/.test(editName) &&
+                      /^[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.(com|net|edu)$/i.test(editEmail) && 
                       !/\s/.test(editEmail) &&
                       !/[<>&"'\/]/.test(editEmail) &&
                       !/[<>&"'\/]/.test(editName) &&
@@ -69,7 +72,7 @@ const ProfilePage = ({ user, onUpdateUser }) => {
 
     const fetchOrders = async () => {
       try {
-        const response = await fetch(`/api/orders/${user.id}`);
+        const response = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/orders/${user.id}`);
         if (response.ok) {
           const data = await response.json();
           setOrders(data);
@@ -96,7 +99,7 @@ const ProfilePage = ({ user, onUpdateUser }) => {
     setStatus({ type: null, message: '' });
 
     try {
-      const response = await fetch(`/api/users/${user.id}`, {
+      const response = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/users/${user.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: editName, email: editEmail }),
@@ -377,13 +380,21 @@ const ProfilePage = ({ user, onUpdateUser }) => {
                             ${(order.total || 0).toLocaleString()}
                           </td>
                           <td className="py-5 px-4 bg-white/[0.03] border-y border-white/10 group-hover:bg-white/[0.05] transition-colors">
-                            <span className={`px-4 py-1.5 rounded-full text-[9px] font-black uppercase tracking-wider flex items-center justify-center w-fit gap-1.5 ${
+                            <span className={`px-4 py-1.5 rounded-full text-[9px] font-black uppercase tracking-wider flex items-center justify-center w-fit gap-1.5 mx-auto ${
                               order.estado === 'Cancelado' ? 'bg-red-500/10 text-red-500 border border-red-500/20' : 
-                              order.estado === 'Pendiente' ? 'bg-amber-500/10 text-amber-500 border border-amber-500/20' : 
+                              order.estado === 'En proceso' || order.estado === 'Pendiente' ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' : 
+                              order.estado === 'En entrega' ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/20' : 
+                              order.estado === 'Enviado' ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20' : 
                               'bg-green-500/10 text-green-500 border border-green-500/20'
                             }`}>
-                              <span className={`w-1.5 h-1.5 rounded-full ${order.estado === 'Cancelado' ? 'bg-red-500' : order.estado === 'Pendiente' ? 'bg-amber-500' : 'bg-green-500'}`} />
-                              {order.estado || 'Entregado'}
+                              <span className={`w-1.5 h-1.5 rounded-full ${
+                                order.estado === 'Cancelado' ? 'bg-red-500' : 
+                                order.estado === 'En proceso' || order.estado === 'Pendiente' ? 'bg-amber-400' : 
+                                order.estado === 'En entrega' ? 'bg-cyan-400' : 
+                                order.estado === 'Enviado' ? 'bg-blue-400' : 
+                                'bg-green-500'
+                              }`} />
+                              {order.estado || 'En proceso'}
                             </span>
                           </td>
                           <td className="py-5 px-4 bg-white/[0.03] border-y border-r border-white/10 rounded-r-[18px] text-center group-hover:bg-white/[0.05] transition-colors">

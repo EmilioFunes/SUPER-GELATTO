@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Star, Truck, ShieldCheck, Heart, ArrowRight,
@@ -52,9 +52,39 @@ const Home = ({ user }) => {
   const { addToCart } = useCart();
   const navigate = useNavigate();
 
-  // Revertido a datos estáticos
-  const flavors = FLAVORS.slice(0, 6);
-  const loading = false;
+  const [allProducts, setAllProducts] = useState([]);
+  const [loadingProducts, setLoadingProducts] = useState(true);
+
+  useEffect(() => {
+    const fetchHomeProducts = async () => {
+      try {
+        const res = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/products`);
+        if (res.ok) {
+          const data = await res.json();
+          setAllProducts(data);
+        }
+      } catch (err) {
+        console.error('Error fetching home products:', err);
+      } finally {
+        setLoadingProducts(false);
+      }
+    };
+
+    fetchHomeProducts();
+    const interval = setInterval(fetchHomeProducts, 2500);
+    window.addEventListener('focus', fetchHomeProducts);
+    window.addEventListener('storage', fetchHomeProducts);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('focus', fetchHomeProducts);
+      window.removeEventListener('storage', fetchHomeProducts);
+    };
+  }, []);
+
+  // Los sabores destacados en Home reflejan 100% los marcados por el Admin
+  const featured = allProducts.filter(p => Boolean(p.destacado)).slice(0, 6);
+  const loading = loadingProducts;
 
   const handleQuickAdd = (flavor, e) => {
     e.stopPropagation(); // Evitar que se abra el modal al presionar el botón de añadir
@@ -149,8 +179,6 @@ const Home = ({ user }) => {
     { icon: <Truck className="text-pastel-blue" />, title: 'Entrega en 30 min', desc: 'Tu antojo llega rápido y en perfecto estado.' },
   ];
 
-  // Show only first 6 flavors as featured
-  const featured = flavors;
 
   return (
     <div className="pt-[80px]">

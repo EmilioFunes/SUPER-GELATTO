@@ -25,7 +25,7 @@ const Navbar = ({ user, onLogout }) => {
     { name: 'Perfil', path: '/perfil' },
   ];
 
-  if (user?.rol === 'admin') {
+  if (user && String(user.rol).trim() === 'admin') {
     navLinks.push({ name: 'Admin', path: '/admin' });
   }
 
@@ -145,7 +145,7 @@ const Navbar = ({ user, onLogout }) => {
                     {user?.name?.split(' ')[0] || 'Gourmet'}
                   </span>
                   <span className="text-[10px] text-white/40 font-medium uppercase tracking-widest mt-1">
-                    {user?.rol === 'admin' ? 'Admin' : 'Miembro'}
+                    {user && String(user.rol).trim() === 'admin' ? 'Admin' : 'Miembro'}
                   </span>
                 </div>
               </Link>
