@@ -1115,6 +1115,30 @@ app.post('/api/orders', async (req, res) => {
 
     if (error) throw error;
 
+    // 1.1 Insertar detalles en detalle_venta y descontar stock de cada producto
+    for (const item of items) {
+      const prodId = item.id;
+      const qty = item.quantity || 1;
+
+      if (prodId) {
+        // Registrar en detalle_venta
+        await supabase.from('detalle_venta').insert([{
+          id_venta: newOrder.id_venta,
+          id_producto: prodId,
+          cantidad: qty,
+          precio_unitario: item.price || 0
+        }]);
+
+        // Consultar stock actual y descontar
+        const { data: prodData } = await supabase.from('producto').select('stock').eq('id_producto', prodId).single();
+        if (prodData && prodData.stock !== undefined) {
+          const newStock = Math.max(0, prodData.stock - qty);
+          await supabase.from('producto').update({ stock: newStock }).eq('id_producto', prodId);
+          await supabase.from('inventario').update({ stock_disponible: newStock, fecha_actualizacion: new Date().toISOString() }).eq('id_producto', prodId);
+        }
+      }
+    }
+
     // 2. Obtener datos del usuario para el correo
     const { data: user, error: userError } = await supabase
       .from('usuario')
@@ -1548,134 +1572,46 @@ app.delete('/api/admin/products/:id', requireAdmin, async (req, res) => {
   }
 });
 
-// Actualizar imagen de un producto
-app.put('/api/admin/products/:id/image', requireAdmin, async (req, res) => {
+// Actualizar producto y stock (Admin)
+app.put('/api/admin/products/:id', requireAdmin, async (req, res) => {
   const { id } = req.params;
-  const { image } = req.body;
-
-  if (!image) {
-    return res.status(400).json({ message: 'La URL o datos de la imagen son obligatorios.' });
-  }
+  const { name, precio, descripcion, categoria, stock, estado } = req.body;
 
   try {
-    const prodId = parseInt(id, 10);
-    
-    // Actualizar en mockDb/Supabase
-    try {
-      await supabase.from('producto').update({ imagen: image }).eq('id_producto', prodId);
-    } catch (e) {
-      console.warn('Advertencia en actualización Supabase:', e);
+    const updateData = {};
+    if (name !== undefined) updateData.nombre = name;
+    if (precio !== undefined) updateData.precio = Number(precio);
+    if (descripcion !== undefined) updateData.descripcion = descripcion;
+    if (categoria !== undefined) updateData.categoria = categoria;
+    if (stock !== undefined) updateData.stock = Math.max(0, parseInt(stock, 10) || 0);
+    if (estado !== undefined) updateData.estado = Boolean(estado);
+
+    const { data: updatedProduct, error } = await supabase
+      .from('producto')
+      .update(updateData)
+      .eq('id_producto', id)
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    // Sincronizar en tabla inventario si se actualizó el stock
+    if (stock !== undefined) {
+      await supabase
+        .from('inventario')
+        .update({ stock_disponible: updateData.stock, fecha_actualizacion: new Date().toISOString() })
+        .eq('id_producto', id);
     }
 
-    const fbItem = FALLBACK_PRODUCTS.find(p => p.id_producto === prodId);
-    if (fbItem) {
-      fbItem.imagen = image;
-    }
-
-    return res.status(200).json({ ok: true, message: 'Imagen del producto actualizada con éxito.', id: prodId, image });
+    return res.status(200).json({
+      message: 'Producto y stock actualizados correctamente.',
+      product: updatedProduct
+    });
   } catch (error) {
-    console.error('Error al actualizar imagen:', error);
-    return res.status(500).json({ message: 'Error al actualizar imagen del producto.' });
+    console.error('Error al actualizar producto:', error);
+    return res.status(500).json({ message: 'Error al actualizar el producto o stock.' });
   }
 });
-
-// Actualizar estado destacado del producto
-app.put('/api/admin/products/:id/featured', requireAdmin, async (req, res) => {
-  const { id } = req.params;
-  const { destacado } = req.body;
-
-  try {
-    const prodId = parseInt(id, 10);
-    const isFeatured = Boolean(destacado);
-
-    // 1. Guardar en archivo persistente (fuente de verdad principal)
-    FEATURED_STATE[prodId] = isFeatured;
-    saveFeaturedState(FEATURED_STATE);
-
-    // 2. Actualizar en memoria del fallback
-    const fbItem = FALLBACK_PRODUCTS.find(p => p.id_producto === prodId);
-    if (fbItem) fbItem.destacado = isFeatured;
-
-    // 3. Intentar Supabase (opcional, no bloquea)
-    try {
-      await supabase.from('producto').update({ destacado: isFeatured }).eq('id_producto', prodId);
-    } catch (e) {
-      console.warn('Advertencia en actualización Supabase (no crítico):', e.message);
-    }
-
-    console.log(`✅ Producto ${prodId} destacado=${isFeatured} guardado en disco.`);
-    return res.status(200).json({ ok: true, message: `Producto ${isFeatured ? 'destacado' : 'retirado de destacados'} con éxito.`, id: prodId, destacado: isFeatured });
-  } catch (error) {
-    console.error('Error al actualizar estado destacado:', error);
-    return res.status(500).json({ message: 'Error al actualizar estado destacado.' });
-  }
-});
-
-// Actualizar precio del producto
-app.put('/api/admin/products/:id/price', requireAdmin, async (req, res) => {
-  const { id } = req.params;
-  const { precio } = req.body;
-  const numPrice = parseInt(precio, 10);
-
-  if (!numPrice || numPrice <= 0) {
-    return res.status(400).json({ message: 'El precio debe ser un número positivo.' });
-  }
-
-  try {
-    const prodId = parseInt(id, 10);
-
-    // Actualizar en fallback en memoria
-    const fbItem = FALLBACK_PRODUCTS.find(p => p.id_producto === prodId);
-    if (fbItem) fbItem.precio = numPrice;
-
-    // Intentar Supabase
-    try {
-      await supabase.from('producto').update({ precio: numPrice }).eq('id_producto', prodId);
-    } catch (e) {
-      console.warn('Advertencia Supabase al actualizar precio:', e.message);
-    }
-
-    console.log(`✅ Producto ${prodId} precio=${numPrice} actualizado.`);
-    return res.status(200).json({ ok: true, message: 'Precio actualizado con éxito.', id: prodId, precio: numPrice });
-  } catch (error) {
-    console.error('Error al actualizar precio:', error);
-    return res.status(500).json({ message: 'Error al actualizar el precio.' });
-  }
-});
-
-// Actualizar categoría del producto
-app.put('/api/admin/products/:id/category', requireAdmin, async (req, res) => {
-  const { id } = req.params;
-  const { categoria } = req.body;
-  const VALID_CATS = ['Clásico', 'Vegano', 'Temporada', 'Gourmet'];
-
-  if (!categoria || !VALID_CATS.includes(categoria)) {
-    return res.status(400).json({ message: 'Categoría inválida. Opciones: ' + VALID_CATS.join(', ') });
-  }
-
-  try {
-    const prodId = parseInt(id, 10);
-
-    // Actualizar en fallback en memoria
-    const fbItem = FALLBACK_PRODUCTS.find(p => p.id_producto === prodId);
-    if (fbItem) fbItem.categoria = categoria;
-
-    // Intentar Supabase
-    try {
-      await supabase.from('producto').update({ categoria }).eq('id_producto', prodId);
-    } catch (e) {
-      console.warn('Advertencia Supabase al actualizar categoría:', e.message);
-    }
-
-    console.log(`✅ Producto ${prodId} categoría=${categoria} actualizada.`);
-    return res.status(200).json({ ok: true, message: 'Categoría actualizada con éxito.', id: prodId, categoria });
-  } catch (error) {
-    console.error('Error al actualizar categoría:', error);
-    return res.status(500).json({ message: 'Error al actualizar la categoría.' });
-  }
-});
-
-// ─── Productos (desde Supabase con Fallback) ───────────────────
 app.get('/api/products', async (req, res) => {
   try {
     let data;
@@ -1721,6 +1657,7 @@ app.get('/api/products', async (req, res) => {
         name:        p.nombre,
         precio:      p.precio,
         price:       p.precio,
+        stock:       p.stock !== undefined && p.stock !== null ? p.stock : 50,
         priceLabel:  new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', minimumFractionDigits: 0 }).format(p.precio),
         desc:        p.descripcion || '',
         longDesc:    p.long_desc || p.descripcion || '',
