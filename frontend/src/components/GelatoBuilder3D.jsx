@@ -330,10 +330,15 @@ const GelatoBuilder3D = ({ user }) => {
           scale: 2.0
         }));
 
-        setScoopsList(dynamicScoops);
-        if (dynamicScoops.length > 0) {
-          setSelectedScoops([dynamicScoops[0].id]);
-        }
+        const mergedMap = new Map();
+        dynamicScoops.forEach(s => mergedMap.set(s.name.toLowerCase().trim(), s));
+        DEFAULT_SCOOPS.forEach(s => {
+          if (!mergedMap.has(s.name.toLowerCase().trim())) {
+            mergedMap.set(s.name.toLowerCase().trim(), s);
+          }
+        });
+
+        setScoopsList(Array.from(mergedMap.values()));
       })
       .catch(err => console.warn('Error al cargar catálogo en 3D:', err));
 
