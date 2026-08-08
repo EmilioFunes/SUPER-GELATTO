@@ -213,10 +213,6 @@ function Login({ onLogin }) {
               type="button"
               onClick={() => {
                 setLoginRole('admin');
-                if (formData.email === '') {
-                  setFormData(prev => ({ ...prev, email: 'saldarriagac890@gmail.com' }));
-                  setErrors(prev => ({ ...prev, email: '' }));
-                }
               }}
               className={`flex-grow flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs font-semibold tracking-wider uppercase transition-all duration-300 cursor-pointer ${
                 loginRole === 'admin'
