@@ -431,9 +431,15 @@ const AdminDashboard = ({ user, onLogout }) => {
       return;
     }
     
-    fetchDashboardData();
+    fetchDashboardData(false);
+
+    // Auto-polling para ventas y métricas en TIEMPO REAL cada 3 segundos
+    const realTimeInterval = setInterval(() => {
+      fetchDashboardData(true);
+    }, 3000);
 
     return () => {
+      clearInterval(realTimeInterval);
       if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
     };
   }, [user, navigate]);
@@ -460,8 +466,8 @@ const AdminDashboard = ({ user, onLogout }) => {
     setIsQrVerified(true);
   };
 
-  const fetchDashboardData = async () => {
-    setLoading(true);
+  const fetchDashboardData = async (silent = false) => {
+    if (!silent) setLoading(true);
     try {
       const res = await apiFetch('/api/admin/dashboard');
       
@@ -481,9 +487,9 @@ const AdminDashboard = ({ user, onLogout }) => {
       
       setDashboardData({ ...data, products });
     } catch (err) {
-      setError(err.message);
+      if (!silent) setError(err.message);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
@@ -872,8 +878,12 @@ const AdminDashboard = ({ user, onLogout }) => {
             </p>
           </div>
           
-          <div className="flex gap-4">
-             <button onClick={fetchDashboardData} className="p-3.5 bg-white/5 border border-white/10 rounded-2xl hover:bg-white/10 transition-colors cursor-pointer" title="Sincronizar datos">
+          <div className="flex items-center gap-3">
+             <div className="flex items-center gap-2 px-4 py-2 bg-green-500/10 border border-green-500/30 rounded-2xl text-xs text-green-400 font-bold uppercase tracking-wider backdrop-blur-md">
+               <span className="w-2.5 h-2.5 rounded-full bg-green-400 animate-ping"></span>
+               Ventas en Tiempo Real
+             </div>
+             <button onClick={() => fetchDashboardData(false)} className="p-3.5 bg-white/5 border border-white/10 rounded-2xl hover:bg-white/10 transition-colors cursor-pointer text-white/70 hover:text-white" title="Sincronizar manualmente">
                <RefreshCw size={18} />
              </button>
           </div>

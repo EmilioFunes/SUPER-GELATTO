@@ -72,6 +72,28 @@ function saveFeaturedState(state) {
 // Mapa en memoria, cargado desde disco al arrancar
 let FEATURED_STATE = loadFeaturedState();
 
+// ─── Estado persistente de VENTAS (Real-Time Fallback) ────────────
+const FALLBACK_SALES_PATH = path.join(__dirname, 'fallback_sales.json');
+
+function loadFallbackSales() {
+  try {
+    if (fs.existsSync(FALLBACK_SALES_PATH)) {
+      return JSON.parse(fs.readFileSync(FALLBACK_SALES_PATH, 'utf8'));
+    }
+  } catch (e) {}
+  return [];
+}
+
+function saveFallbackSales(sales) {
+  try {
+    fs.writeFileSync(FALLBACK_SALES_PATH, JSON.stringify(sales), 'utf8');
+  } catch (e) {
+    console.warn('No se pudo guardar fallback_sales.json:', e.message);
+  }
+}
+
+let FALLBACK_SALES = loadFallbackSales();
+
 // ─── Estado persistente de MODELOS 3D (Tripo AI) ────────────────
 const TRIPO_STORE_PATH = path.join(__dirname, 'tripo_models_state.json');
 
@@ -1347,12 +1369,12 @@ app.get('/api/admin/dashboard', requireAdmin, async (req, res) => {
 
     if (userError) throw userError;
 
-    // Obtener ventas
+    // Obtener ventas combinando Supabase y FALLBACK_SALES en tiempo real
     let rawSales = [];
     try {
       const { data: salesData, error: salesErr } = await supabase
         .from('venta')
-        .select('id_venta, id_usuario, total, fecha')
+        .select('id_venta, id_usuario, total, fecha, estado')
         .order('fecha', { ascending: false });
       
       if (salesErr) {
@@ -1364,13 +1386,23 @@ app.get('/api/admin/dashboard', requireAdmin, async (req, res) => {
       console.warn('Error al obtener ventas:', e);
     }
 
-    const sales = rawSales.map(s => {
+    const salesMap = new Map();
+    rawSales.forEach(s => salesMap.set(String(s.id_venta), s));
+    FALLBACK_SALES.forEach(s => {
+      if (!salesMap.has(String(s.id_venta))) {
+        salesMap.set(String(s.id_venta), s);
+      }
+    });
+
+    const combinedRawSales = Array.from(salesMap.values()).sort((a, b) => new Date(b.fecha) - new Date(a.fecha));
+
+    const sales = combinedRawSales.map(s => {
       const u = (users || []).find(usr => String(usr.id_usuario) === String(s.id_usuario));
       return {
         ...s,
-        email: u ? u.email : (s.email || null),
-        nombre: u ? u.nombre : null,
-        apellido: u ? u.apellido : null,
+        email: s.email || (u ? u.email : null),
+        nombre: s.nombre || (u ? u.nombre : null),
+        apellido: s.apellido || (u ? u.apellido : null),
         estado: s.estado || 'En proceso'
       };
     });
@@ -1546,6 +1578,13 @@ app.put('/api/admin/sales/:id/status', requireAdmin, async (req, res) => {
   }
 
   try {
+    // Actualizar en FALLBACK_SALES
+    const fbSale = FALLBACK_SALES.find(s => String(s.id_venta) === String(id));
+    if (fbSale) {
+      fbSale.estado = estado;
+      saveFallbackSales(FALLBACK_SALES);
+    }
+
     const { data, error } = await supabase
       .from('venta')
       .update({ estado })
@@ -1565,6 +1604,102 @@ app.put('/api/admin/sales/:id/status', requireAdmin, async (req, res) => {
   } catch (error) {
     console.error('Error al actualizar el estado de la venta:', error);
     return res.status(500).json({ message: 'Error al actualizar el estado de la venta.' });
+  }
+});
+
+// ─── CREACIÓN Y REGISTRO DE VENTAS EN TIEMPO REAL ─────────────────
+app.post('/api/orders', async (req, res) => {
+  const { userId, total, deliveryDetails, items } = req.body;
+
+  const numTotal = Number(total);
+  if (isNaN(numTotal) || numTotal <= 0) {
+    return res.status(400).json({ message: 'El total del pedido debe ser un número mayor a 0.' });
+  }
+
+  try {
+    const saleId = Date.now();
+    const nowIso = new Date().toISOString();
+
+    const newSaleItem = {
+      id_venta: saleId,
+      id_usuario: userId || null,
+      total: numTotal,
+      fecha: nowIso,
+      estado: 'En proceso',
+      email: deliveryDetails?.email || (req.user?.email || null),
+      nombre: deliveryDetails?.fullName || 'Cliente Realtime',
+      deliveryDetails: deliveryDetails || {},
+      items: items || []
+    };
+
+    // 1. Guardar localmente para disponibilidad instantánea en tiempo real
+    FALLBACK_SALES.unshift(newSaleItem);
+    saveFallbackSales(FALLBACK_SALES);
+
+    // 2. Intentar guardar en Supabase
+    try {
+      await supabase.from('venta').insert([{
+        id_venta: saleId,
+        id_usuario: userId || null,
+        total: numTotal,
+        fecha: nowIso,
+        estado: 'En proceso'
+      }]);
+    } catch (supaErr) {
+      console.warn('Advertencia Supabase al insertar venta:', supaErr.message);
+    }
+
+    // 3. Descontar stock en tiempo real
+    if (Array.isArray(items)) {
+      items.forEach(item => {
+        const itemName = (item.name || item.nombre || '').toLowerCase().trim();
+        const qty = item.quantity || item.cantidad || 1;
+        const prod = FALLBACK_PRODUCTS.find(p => (p.nombre || '').toLowerCase().trim() === itemName || (p.name || '').toLowerCase().trim() === itemName);
+        if (prod) {
+          prod.stock = Math.max(0, (prod.stock !== undefined ? prod.stock : 50) - qty);
+          prod.stock_disponible = prod.stock;
+        }
+      });
+    }
+
+    console.log(`🛒 ¡Venta registrada en TIEMPO REAL! ID: ${saleId}, Total: $${numTotal}`);
+    return res.status(201).json({
+      ok: true,
+      message: 'Venta registrada con éxito en tiempo real.',
+      sale: newSaleItem
+    });
+  } catch (error) {
+    console.error('Error al registrar pedido:', error);
+    return res.status(500).json({ message: 'Error interno al procesar el pedido.' });
+  }
+});
+
+app.post('/api/sales', async (req, res) => {
+  const { userId, total, deliveryDetails, items } = req.body;
+  const numTotal = Number(total);
+
+  try {
+    const saleId = Date.now();
+    const nowIso = new Date().toISOString();
+
+    const newSaleItem = {
+      id_venta: saleId,
+      id_usuario: userId || null,
+      total: numTotal,
+      fecha: nowIso,
+      estado: 'En proceso',
+      email: deliveryDetails?.email || null,
+      nombre: deliveryDetails?.fullName || 'Cliente Realtime',
+      deliveryDetails: deliveryDetails || {},
+      items: items || []
+    };
+
+    FALLBACK_SALES.unshift(newSaleItem);
+    saveFallbackSales(FALLBACK_SALES);
+
+    return res.status(201).json({ ok: true, sale: newSaleItem });
+  } catch (err) {
+    return res.status(500).json({ message: 'Error al guardar venta.' });
   }
 });
 
