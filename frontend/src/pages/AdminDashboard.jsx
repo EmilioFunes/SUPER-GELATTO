@@ -10,6 +10,22 @@ import Model3DPreview from '../components/Model3DPreview';
 import CapturaFacial from '../components/CapturaFacial';
 import { apiFetch } from '../utils/api';
 
+const getProductFallbackImage = (name = '') => {
+  const n = String(name).toLowerCase();
+  if (n.includes('fresa') || n.includes('romeo')) return '/images/gelato_fresa.png';
+  if (n.includes('chocolate')) return '/images/gelato_chocolate.png';
+  if (n.includes('mango')) return '/images/gelato_mango.png';
+  if (n.includes('pistacho')) return '/images/gelato_pistacho.png';
+  if (n.includes('coco')) return '/images/Coco & Lima.png';
+  if (n.includes('vainilla')) return '/images/vainilla de madagascar.png';
+  if (n.includes('matcha')) return '/images/Matcha Ceremonial.png';
+  if (n.includes('tiramisu') || n.includes('tiramisú')) return '/images/Tiramisú Artigianale.png';
+  if (n.includes('caramelo')) return '/images/caramelo salado.png';
+  if (n.includes('limon') || n.includes('limone')) return '/images/limone di amalfi.png';
+  if (n.includes('rosa')) return '/images/rosa y lichi.png';
+  return '/images/gelato_berries.png';
+};
+
 const AdminDashboard = ({ user, onLogout }) => {
   const [dashboardData, setDashboardData] = useState({ stats: {}, users: [], sales: [], products: [] });
   const [loading, setLoading] = useState(true);
@@ -1262,23 +1278,35 @@ const AdminDashboard = ({ user, onLogout }) => {
                       <tr key={p.id} className="hover:bg-white/[0.02] transition-colors group">
                         <td className="p-6 text-white/20 font-mono text-xs">PROD-{p.id}</td>
                         <td className="p-6">
-                          <div className="flex items-center gap-4">
-                            <div className="relative group/img cursor-pointer" onClick={() => handleOpenImageModal(p)}>
-                              <img src={p.image} alt="" className="w-12 h-12 rounded-xl object-cover border border-white/10 group-hover/img:brightness-75 transition-all" />
-                              <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover/img:opacity-100 transition-opacity bg-black/40 rounded-xl">
-                                <Camera size={14} className="text-white" />
+                          <div className="flex items-center gap-4 min-w-[260px]">
+                            <div 
+                              className="relative group/img cursor-pointer w-14 h-14 shrink-0 rounded-2xl overflow-hidden bg-[#111116] border border-white/10 group-hover/img:border-gold-premium/40 transition-all flex items-center justify-center" 
+                              onClick={() => handleOpenImageModal(p)}
+                              title="Haz clic para modificar la imagen de este producto"
+                            >
+                              <img 
+                                src={p.image || p.imagen || getProductFallbackImage(p.name)} 
+                                alt={p.name} 
+                                className="w-full h-full object-cover group-hover/img:scale-110 group-hover/img:brightness-90 transition-all duration-300"
+                                onError={(e) => {
+                                  e.target.onerror = null;
+                                  e.target.src = getProductFallbackImage(p.name);
+                                }}
+                              />
+                              <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover/img:opacity-100 transition-opacity bg-black/60 rounded-2xl">
+                                <Camera size={16} className="text-gold-premium drop-shadow-md" />
                               </div>
                             </div>
-                            <div>
-                              <p className="font-medium text-white flex items-center gap-2">
-                                {p.name}
+                            <div className="min-w-0 flex-1">
+                              <p className="font-medium text-white flex items-center gap-2 text-sm">
+                                <span className="truncate">{p.name}</span>
                                 {p.destacado && (
-                                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-gold-premium/20 text-gold-premium border border-gold-premium/30 font-bold flex items-center gap-1">
+                                  <span className="shrink-0 text-[10px] px-2 py-0.5 rounded-full bg-gold-premium/20 text-gold-premium border border-gold-premium/30 font-bold flex items-center gap-1">
                                     <Star size={10} className="fill-gold-premium" /> Destacado
                                   </span>
                                 )}
                               </p>
-                              <p className="text-[10px] text-white/40 line-clamp-1 max-w-[220px]">{p.desc}</p>
+                              <p className="text-[11px] text-white/40 line-clamp-1 mt-0.5">{p.desc}</p>
                             </div>
                           </div>
                         </td>
@@ -1576,7 +1604,15 @@ const AdminDashboard = ({ user, onLogout }) => {
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
                   {dashboardData.products.filter(p => p.destacado).map(p => (
                     <div key={`preview-${p.id}`} className="bg-white/5 border border-white/10 rounded-2xl p-4 flex items-center gap-3">
-                      <img src={p.image} alt="" className="w-12 h-12 rounded-xl object-cover border border-white/10" />
+                      <img 
+                        src={p.image || p.imagen || getProductFallbackImage(p.name)} 
+                        alt={p.name} 
+                        className="w-12 h-12 shrink-0 rounded-xl object-cover border border-white/10 bg-black/40" 
+                        onError={(e) => {
+                          e.target.onerror = null;
+                          e.target.src = getProductFallbackImage(p.name);
+                        }}
+                      />
                       <div>
                         <p className="text-xs font-bold text-white line-clamp-1">{p.name}</p>
                         <p className="text-[10px] text-gold-premium font-bold">{formatCurrency(p.precio)}</p>
