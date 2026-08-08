@@ -28,6 +28,78 @@ const TOPPING_TRANSFORMS = [
   { pos: [-0.12, 0.05, -0.12], rot: [-0.1, -Math.PI / 6, 0.1] },       // 3rd topping: slightly left/back, tilted
 ];
 
+/* ─── Single Part Model with Material Optimization ────────────── */
+const PartModel = ({ url, position = [0, 0, 0], rotation = [0, 0, 0], scale = 1, isScoop = false }) => {
+  const { scene } = useGLTF(url);
+  
+  // Clone and optimize materials for a "creamy" look
+  const cloned = useMemo(() => {
+    const root = scene.clone();
+    root.traverse((node) => {
+      if (node.isMesh) {
+        node.castShadow = true;
+        node.receiveShadow = true;
+        if (isScoop && node.material) {
+          node.material.roughness = 0.8;
+          node.material.metalness = 0.1;
+          node.material.envMapIntensity = 0.5;
+        }
+      }
+    });
+    return root;
+  }, [scene, isScoop]);
+
+  return <primitive object={cloned} position={position} rotation={rotation} scale={scale} />;
+};
+
+/* ─── Rotating Group that holds all parts ─────────────── */
+const RotatingGroup = ({ children }) => {
+  const ref = useRef();
+  useFrame((state, delta) => {
+    if (ref.current) {
+      ref.current.rotation.y += delta * 0.6;
+    }
+  });
+  return <group ref={ref}>{children}</group>;
+};
+
+/* ─── Auto-adjusting camera based on item count ───────── */
+const CameraAdjuster = ({ scoopCount, toppingCount }) => {
+  useFrame(({ camera }) => {
+    const totalItems = scoopCount + toppingCount;
+    const targetZ = 8 + totalItems * 1.2;
+    const targetY = 3 + totalItems * 0.6;
+    const lookAtY = -0.5 + scoopCount * 0.3;
+    camera.position.z += (targetZ - camera.position.z) * 0.04;
+    camera.position.y += (targetY - camera.position.y) * 0.04;
+    camera.lookAt(0, lookAtY, 0);
+  });
+  return null;
+};
+
+/* ─── Premium Loading Experience ─────────────────────────── */
+const Loader = () => (
+  <Html center>
+    <div className="flex flex-col items-center gap-4 bg-background-dark/80 backdrop-blur-xl p-8 rounded-[32px] border border-white/10 shadow-2xl scale-75 md:scale-100">
+      <div className="relative">
+        <div className="w-16 h-16 border-4 border-gold-premium/20 border-t-gold-premium rounded-full animate-spin" />
+        <div className="absolute inset-0 flex items-center justify-center text-xl">🍦</div>
+      </div>
+      <div className="flex flex-col items-center">
+        <span className="text-white font-bold tracking-[0.2em] uppercase text-[10px]">Cocinando...</span>
+        <span className="text-white/40 text-[8px] uppercase tracking-widest mt-1">Arte en proceso</span>
+      </div>
+    </div>
+  </Html>
+);
+
+/* ─── Data ────────────────────────────────────────────── */
+const containers = [
+  { id: 'cone', name: 'Cono', file: 'cone.glb', emoji: '🍦', scale: 2.2 },
+  { id: 'cup', name: 'Copa', file: 'cup.glb', emoji: '🥤', scale: 2.0 },
+  { id: 'glass', name: 'Vaso', file: 'glass.glb', emoji: '🍷', scale: 2.0 },
+];
+
 const DEFAULT_SCOOPS = [
   { id: 'vanilla', name: 'Vainilla', file: 'scoop_vanilla.glb', color: '#F3E5AB', emoji: '🍨', scale: 2.0 },
   { id: 'chocolate', name: 'Chocolate', file: 'scoop_chocolate.glb', color: '#5C3317', emoji: '🍫', scale: 2.0 },
