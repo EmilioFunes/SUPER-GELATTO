@@ -686,7 +686,7 @@ const GelatoBuilder3D = ({ user }) => {
 };
 
 // ─── Preload assets to avoid popping ────────────────────────
-[...containers, ...scoops, ...toppingsData].forEach(item => {
+[...containers, ...DEFAULT_SCOOPS, ...toppingsData].forEach(item => {
   useGLTF.preload(`${BASE_PATH}/${item.file}`);
 });
 
