@@ -1,10 +1,11 @@
-import React, { useState, Suspense, useRef, useMemo } from 'react';
+import React, { useState, useEffect, Suspense, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Canvas, useFrame } from '@react-three/fiber';
 import { OrbitControls, useGLTF, Environment, ContactShadows, Html } from '@react-three/drei';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, ShoppingCart } from 'lucide-react';
 import { useCart, formatPrice } from '../context/CartContext';
+import { apiFetch } from '../utils/api';
 
 // Silence THREE.Clock, WebGLProgram & DirectX X4122 shader precision warnings
 if (typeof window !== 'undefined') {
@@ -27,82 +28,7 @@ const TOPPING_TRANSFORMS = [
   { pos: [-0.12, 0.05, -0.12], rot: [-0.1, -Math.PI / 6, 0.1] },       // 3rd topping: slightly left/back, tilted
 ];
 
-/* ─── Single Part Model with Material Optimization ────────────── */
-const PartModel = ({ url, position = [0, 0, 0], rotation = [0, 0, 0], scale = 1, isScoop = false }) => {
-  const { scene } = useGLTF(url);
-  
-  // Clone and optimize materials for a "creamy" look
-  const cloned = useMemo(() => {
-    const root = scene.clone();
-    root.traverse((node) => {
-      if (node.isMesh) {
-        node.castShadow = true;
-        node.receiveShadow = true;
-        if (isScoop && node.material) {
-          // Helado: Menos brillo, más suavidad (subsurface-ish)
-          node.material.roughness = 0.8;
-          node.material.metalness = 0.1;
-          node.material.envMapIntensity = 0.5;
-        }
-      }
-    });
-    return root;
-  }, [scene, isScoop]);
-
-  return <primitive object={cloned} position={position} rotation={rotation} scale={scale} />;
-};
-
-/* ─── Rotating Group that holds all parts ─────────────── */
-const RotatingGroup = ({ children }) => {
-  const ref = useRef();
-  useFrame((state, delta) => {
-    if (ref.current) {
-      ref.current.rotation.y += delta * 0.6; // Suave rotación incremental
-    }
-  });
-  return <group ref={ref}>{children}</group>;
-};
-
-/* ─── Auto-adjusting camera based on item count ───────── */
-const CameraAdjuster = ({ scoopCount, toppingCount }) => {
-  useFrame(({ camera }) => {
-    const totalItems = scoopCount + toppingCount;
-    // Zoom out more aggressively to keep everything in view
-    const targetZ = 8 + totalItems * 1.2;
-    const targetY = 3 + totalItems * 0.6;
-    const lookAtY = -0.5 + scoopCount * 0.3;
-    camera.position.z += (targetZ - camera.position.z) * 0.04;
-    camera.position.y += (targetY - camera.position.y) * 0.04;
-    camera.lookAt(0, lookAtY, 0);
-  });
-  return null;
-};
-
-/* ─── Loading Spinner ─────────────────────────────────── */
-/* ─── Premium Loading Experience ─────────────────────────── */
-const Loader = () => (
-  <Html center>
-    <div className="flex flex-col items-center gap-4 bg-background-dark/80 backdrop-blur-xl p-8 rounded-[32px] border border-white/10 shadow-2xl scale-75 md:scale-100">
-      <div className="relative">
-        <div className="w-16 h-16 border-4 border-gold-premium/20 border-t-gold-premium rounded-full animate-spin" />
-        <div className="absolute inset-0 flex items-center justify-center text-xl">🍦</div>
-      </div>
-      <div className="flex flex-col items-center">
-        <span className="text-white font-bold tracking-[0.2em] uppercase text-[10px]">Cocinando...</span>
-        <span className="text-white/40 text-[8px] uppercase tracking-widest mt-1">Arte en proceso</span>
-      </div>
-    </div>
-  </Html>
-);
-
-/* ─── Data ────────────────────────────────────────────── */
-const containers = [
-  { id: 'cone', name: 'Cono', file: 'cone.glb', emoji: '🍦', scale: 2.2 },
-  { id: 'cup', name: 'Copa', file: 'cup.glb', emoji: '🥤', scale: 2.0 },
-  { id: 'glass', name: 'Vaso', file: 'glass.glb', emoji: '🍷', scale: 2.0 },
-];
-
-const scoops = [
+const DEFAULT_SCOOPS = [
   { id: 'vanilla', name: 'Vainilla', file: 'scoop_vanilla.glb', color: '#F3E5AB', emoji: '🍨', scale: 2.0 },
   { id: 'chocolate', name: 'Chocolate', file: 'scoop_chocolate.glb', color: '#5C3317', emoji: '🍫', scale: 2.0 },
   { id: 'fresa', name: 'Fresa', file: 'scoop_fresa.glb', color: '#FF6B8A', emoji: '🍓', scale: 2.0 },
@@ -110,6 +36,19 @@ const scoops = [
   { id: 'menta', name: 'Menta', file: 'scoop_menta.glb', color: '#98FB98', emoji: '🌿', scale: 2.0 },
   { id: 'mora', name: 'Mora', file: 'scoop_mora.glb', color: '#8B45A6', emoji: '🫐', scale: 2.0 },
 ];
+
+const getFlavorColor = (name = '', cat = '') => {
+  const n = String(name).toLowerCase();
+  if (n.includes('dulce') || n.includes('caramelo')) return '#D4AF37';
+  if (n.includes('fresa') || n.includes('berry') || n.includes('mora') || n.includes('rosa')) return '#FF6B8A';
+  if (n.includes('chocolate') || n.includes('tiramis')) return '#5C3317';
+  if (n.includes('mango') || n.includes('maracuy')) return '#FFB347';
+  if (n.includes('pistacho') || n.includes('menta') || n.includes('matcha')) return '#A3C1AD';
+  if (n.includes('coco') || n.includes('vainilla') || n.includes('limon') || n.includes('limón')) return '#F3E5AB';
+  if (cat === 'Vegano') return '#86EFAC';
+  if (cat === 'Temporada') return '#F9A8D4';
+  return '#D4AF37';
+};
 
 const toppingsData = [
   { id: 'cherry', name: 'Cereza', file: 'topping_cherry.glb', emoji: '🍒', scale: 2.0 },
@@ -123,7 +62,7 @@ const toppingsData = [
 ];
 
 /* ─── Scene ───────────────────────────────────────────── */
-const GelatoScene = ({ container, selectedScoops, selectedToppings }) => {
+const GelatoScene = ({ container, selectedScoops, selectedToppings, availableScoops = DEFAULT_SCOOPS }) => {
   const containerData = containers.find(c => c.id === container);
 
   const baseY = -1;
@@ -161,14 +100,18 @@ const GelatoScene = ({ container, selectedScoops, selectedToppings }) => {
 
         {/* Scoops — stacked above the container */}
         {selectedScoops.map((scoopId, index) => {
-          const scoopData = scoops.find(s => s.id === scoopId);
+          const scoopData = availableScoops.find(s => String(s.id) === String(scoopId)) || DEFAULT_SCOOPS.find(s => String(s.id) === String(scoopId));
           if (!scoopData) return null;
           const y = firstScoopY + index * SCOOP_HEIGHT;
+          const modelUrl = (scoopData.file && (scoopData.file.startsWith('http') || scoopData.file.startsWith('/')))
+            ? scoopData.file
+            : `${BASE_PATH}/${scoopData.file || 'scoop_vanilla.glb'}`;
+
           return (
             <Suspense key={`scoop-${index}-${scoopId}`} fallback={null}>
               <PartModel
-                url={`${BASE_PATH}/${scoopData.file}`}
-                scale={scoopData.scale}
+                url={modelUrl}
+                scale={scoopData.scale || 2.0}
                 position={[0, y, 0]}
                 isScoop={true}
               />
@@ -216,7 +159,7 @@ const GelatoScene = ({ container, selectedScoops, selectedToppings }) => {
 };
 
 // Memoize the entire 3D segment to prevent re-mounts on global state changes (like Cart)
-const MemoizedCanvas = React.memo(({ container, selectedScoops, selectedToppings, canvasRef }) => {
+const MemoizedCanvas = React.memo(({ container, selectedScoops, selectedToppings, availableScoops, canvasRef }) => {
   return (
     <Canvas
       ref={canvasRef}
@@ -234,6 +177,7 @@ const MemoizedCanvas = React.memo(({ container, selectedScoops, selectedToppings
         container={container} 
         selectedScoops={selectedScoops} 
         selectedToppings={selectedToppings} 
+        availableScoops={availableScoops}
       />
     </Canvas>
   );
@@ -296,6 +240,38 @@ const GelatoBuilder3D = ({ user }) => {
   const [selectedScoops, setSelectedScoops] = useState(['vanilla']);
   const [selectedToppings, setSelectedToppings] = useState([]);
   const [activeTab, setActiveTab] = useState('container');
+  const [scoopsList, setScoopsList] = useState(DEFAULT_SCOOPS);
+
+  useEffect(() => {
+    let isMounted = true;
+    apiFetch('/api/products')
+      .then(res => res.ok ? res.json() : [])
+      .then(products => {
+        if (!isMounted || !Array.isArray(products) || products.length === 0) return;
+
+        const dynamicScoops = products.map(p => ({
+          id: String(p.id || p.id_producto),
+          name: p.name || p.nombre,
+          file: p.model_3d_url || p.glb_url || 'scoop_vanilla.glb',
+          color: getFlavorColor(p.name || p.nombre, p.categoria),
+          emoji: p.emoji || '🍨',
+          scale: 2.0
+        }));
+
+        const mergedMap = new Map();
+        dynamicScoops.forEach(s => mergedMap.set(s.name.toLowerCase().trim(), s));
+        DEFAULT_SCOOPS.forEach(s => {
+          if (!mergedMap.has(s.name.toLowerCase().trim())) {
+            mergedMap.set(s.name.toLowerCase().trim(), s);
+          }
+        });
+
+        setScoopsList(Array.from(mergedMap.values()));
+      })
+      .catch(err => console.warn('Error al cargar catálogo en 3D:', err));
+
+    return () => { isMounted = false; };
+  }, []);
 
   // Calculate price: Base(10k) + Extra Scoops(2k each) + Toppings(1k each)
   const basePrice = 10000;
@@ -322,7 +298,7 @@ const GelatoBuilder3D = ({ user }) => {
     }
 
     const containerName = containers.find(c => c.id === container)?.name || 'Gelato';
-    const firstScoop = scoops.find(s => s.id === selectedScoops[0]);
+    const firstScoop = scoopsList.find(s => String(s.id) === String(selectedScoops[0])) || DEFAULT_SCOOPS[0];
 
     const customProduct = {
       id: `custom-${Date.now()}`,
@@ -387,8 +363,8 @@ const GelatoBuilder3D = ({ user }) => {
     setSelectedToppings(prev => prev.filter((_, i) => i !== index));
   };
 
-  const getScoopCount = (id) => selectedScoops.filter(s => s === id).length;
-  const getToppingCount = (id) => selectedToppings.filter(t => t === id).length;
+  const getScoopCount = (id) => selectedScoops.filter(s => String(s) === String(id)).length;
+  const getToppingCount = (id) => selectedToppings.filter(t => String(t) === String(id)).length;
 
   return (
     <section className="py-24 px-6 relative overflow-hidden">
@@ -447,6 +423,7 @@ const GelatoBuilder3D = ({ user }) => {
               container={container} 
               selectedScoops={selectedScoops} 
               selectedToppings={selectedToppings} 
+              availableScoops={scoopsList}
               canvasRef={canvasRef}
             />
 
@@ -529,11 +506,11 @@ const GelatoBuilder3D = ({ user }) => {
                     />
                   ))}
 
-                  {activeTab === 'scoop' && scoops.map((item) => (
+                  {activeTab === 'scoop' && scoopsList.map((item) => (
                     <SelectorButton
                       key={item.id}
                       item={item}
-                      isSelected={selectedScoops.includes(item.id)}
+                      isSelected={selectedScoops.map(String).includes(String(item.id))}
                       onClick={() => handleToggleScoop(item.id)}
                       showColor={true}
                       count={getScoopCount(item.id)}
@@ -577,7 +554,7 @@ const GelatoBuilder3D = ({ user }) => {
                   <div className="flex flex-wrap gap-1.5 mt-1.5">
                     <AnimatePresence>
                       {selectedScoops.map((scoopId, idx) => {
-                        const s = scoops.find(sc => sc.id === scoopId);
+                        const s = scoopsList.find(sc => String(sc.id) === String(scoopId));
                         return s ? (
                           <SelectionChip
                             key={`s-${idx}`}
