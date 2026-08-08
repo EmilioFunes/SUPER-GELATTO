@@ -312,38 +312,7 @@ const GelatoBuilder3D = ({ user }) => {
   const [selectedScoops, setSelectedScoops] = useState(['vanilla']);
   const [selectedToppings, setSelectedToppings] = useState([]);
   const [activeTab, setActiveTab] = useState('container');
-  const [scoopsList, setScoopsList] = useState(DEFAULT_SCOOPS);
-
-  useEffect(() => {
-    let isMounted = true;
-    apiFetch('/api/products')
-      .then(res => res.ok ? res.json() : [])
-      .then(products => {
-        if (!isMounted || !Array.isArray(products) || products.length === 0) return;
-
-        const dynamicScoops = products.map(p => ({
-          id: String(p.id || p.id_producto),
-          name: p.name || p.nombre,
-          file: p.model_3d_url || p.glb_url || 'scoop_vanilla.glb',
-          color: getFlavorColor(p.name || p.nombre, p.categoria),
-          emoji: p.emoji || '🍨',
-          scale: 2.0
-        }));
-
-        const mergedMap = new Map();
-        dynamicScoops.forEach(s => mergedMap.set(s.name.toLowerCase().trim(), s));
-        DEFAULT_SCOOPS.forEach(s => {
-          if (!mergedMap.has(s.name.toLowerCase().trim())) {
-            mergedMap.set(s.name.toLowerCase().trim(), s);
-          }
-        });
-
-        setScoopsList(Array.from(mergedMap.values()));
-      })
-      .catch(err => console.warn('Error al cargar catálogo en 3D:', err));
-
-    return () => { isMounted = false; };
-  }, []);
+  const scoopsList = DEFAULT_SCOOPS;
 
   // Calculate price: Base(10k) + Extra Scoops(2k each) + Toppings(1k each)
   const basePrice = 10000;
