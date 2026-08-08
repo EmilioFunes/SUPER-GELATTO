@@ -72,6 +72,89 @@ function saveFeaturedState(state) {
 // Mapa en memoria, cargado desde disco al arrancar
 let FEATURED_STATE = loadFeaturedState();
 
+// ─── Estado persistente de MODELOS 3D (Tripo AI) ────────────────
+const TRIPO_STORE_PATH = path.join(__dirname, 'tripo_models_state.json');
+
+function loadTripoModelsState() {
+  try {
+    if (fs.existsSync(TRIPO_STORE_PATH)) {
+      return JSON.parse(fs.readFileSync(TRIPO_STORE_PATH, 'utf8'));
+    }
+  } catch (e) {}
+  return {};
+}
+
+function saveTripoModelsState(state) {
+  try {
+    fs.writeFileSync(TRIPO_STORE_PATH, JSON.stringify(state), 'utf8');
+  } catch (e) {
+    console.warn('No se pudo guardar tripo_models_state.json:', e.message);
+  }
+}
+
+let TRIPO_MODELS_STATE = loadTripoModelsState();
+
+// ─── Tripo 3D AI Helper Functions ─────────────────────────────
+const TRIPO_API_KEY = process.env.TRIPO_API_KEY || 'tsk_2lZ_a8JY7brp7zM_Ucbx77blqm3R3T3CScLfd-MHF3W';
+
+async function startTripoTask(promptText) {
+  const finalPrompt = (promptText && promptText.trim())
+    ? promptText.trim()
+    : 'A 3D model of a gourmet artisanal gelato ice cream cone with vibrant colors and rich textures';
+
+  console.log(`🤖 Iniciando generación 3D en Tripo AI con prompt: "${finalPrompt}"`);
+  const response = await fetch('https://api.tripo3d.ai/v2/openapi/task', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${TRIPO_API_KEY}`
+    },
+    body: JSON.stringify({
+      type: 'text_to_model',
+      prompt: finalPrompt
+    })
+  });
+
+  const data = await response.json();
+  if (!response.ok || data.code !== 0) {
+    console.error('❌ Error en respuesta de Tripo3D API:', data);
+    throw new Error(data.message || `Error en la API de Tripo3D (Código ${data.code || response.status})`);
+  }
+
+  console.log(`✅ Tarea Tripo3D creada con éxito. Task ID: ${data.data.task_id}`);
+  return data.data.task_id;
+}
+
+async function getTripoTaskStatus(taskId) {
+  try {
+    const response = await fetch(`https://api.tripo3d.ai/v2/openapi/task/${taskId}`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${TRIPO_API_KEY}`
+      }
+    });
+
+    const data = await response.json();
+    if (!response.ok || data.code !== 0) {
+      throw new Error(data.message || 'Error al consultar tarea en Tripo3D API');
+    }
+
+    const task = data.data;
+    const status = task.status; // 'queued', 'running', 'success', 'failed'
+    const modelUrl = task.output?.model || task.output?.pbr_model || null;
+
+    return {
+      status,
+      progress: task.progress || 0,
+      modelUrl,
+      renderedImage: task.output?.rendered_image || null
+    };
+  } catch (error) {
+    console.error(`Error consultando tarea Tripo3D ${taskId}:`, error.message);
+    return { status: 'error', progress: 0, modelUrl: null };
+  }
+}
+
 const FALLBACK_PRODUCTS = [
   {
     id_producto: 1,
@@ -1524,7 +1607,12 @@ app.post('/api/admin/create-admin', requireAdmin, async (req, res) => {
 // pero dejamos el endpoint preparado.
 // Endpoint para agregar un nuevo producto al catálogo
 app.post('/api/admin/products', requireAdmin, async (req, res) => {
-  let { name, description, price, category, image, featured, stock } = req.body;
+  let { name, description, price, category, image, featured, stock, nombre, descripcion, precio, categoria, prompt_usado, prompt3d, prompt } = req.body;
+
+  name = name || nombre;
+  description = description || descripcion;
+  price = price || precio;
+  category = category || categoria;
 
   if (!name || !price) {
     return res.status(400).json({ message: 'El nombre y el precio del producto son obligatorios.' });
@@ -1569,6 +1657,26 @@ app.post('/api/admin/products', requireAdmin, async (req, res) => {
     // Agregar a FALLBACK_PRODUCTS para sincronización local en memoria
     FALLBACK_PRODUCTS.unshift(newProdItem);
 
+    // Iniciar generación 3D con Tripo AI si se proporcionó un prompt
+    let modelObj = null;
+    const tripoPrompt = prompt_usado || prompt3d || prompt;
+    if (tripoPrompt && tripoPrompt.trim()) {
+      try {
+        const taskId = await startTripoTask(tripoPrompt);
+        TRIPO_MODELS_STATE[nextId] = {
+          taskId,
+          prompt: tripoPrompt,
+          estado: 'generando',
+          url: null,
+          createdAt: new Date().toISOString()
+        };
+        saveTripoModelsState(TRIPO_MODELS_STATE);
+        modelObj = { taskId, estado: 'generando' };
+      } catch (tripoErr) {
+        console.warn('Advertencia al iniciar tarea en Tripo3D AI:', tripoErr.message);
+      }
+    }
+
     const createdProductObj = {
       id: nextId,
       name: name,
@@ -1584,7 +1692,8 @@ app.post('/api/admin/products', requireAdmin, async (req, res) => {
     return res.status(201).json({
       ok: true,
       message: 'Producto creado y agregado al catálogo exitosamente.',
-      product: createdProductObj
+      product: createdProductObj,
+      model: modelObj
     });
   } catch (error) {
     console.error('Error al crear producto:', error);
@@ -1867,6 +1976,108 @@ app.get('/api/products', async (req, res) => {
 // ─── Chatbot (MCP RBAC) ──────────────────────────────────────
 app.post('/api/chatbot', async (req, res) => {
   await handleChatbotRequest(req, res, supabase);
+});
+
+// ─── TRI PO 3D AI GENERATOR ENDPOINTS ─────────────────────────
+
+// Consultar el estado o la URL del modelo 3D de un producto
+app.get('/api/admin/products/:id/model-3d', async (req, res) => {
+  const { id } = req.params;
+  const prodId = parseInt(id, 10);
+
+  try {
+    const modelState = TRIPO_MODELS_STATE[prodId];
+
+    if (!modelState) {
+      return res.status(200).json({ estado: 'idle', url: null, glb_url: null });
+    }
+
+    // Si ya está listo y tenemos la URL guardada
+    if (modelState.estado === 'listo' && modelState.url) {
+      return res.status(200).json({
+        estado: 'listo',
+        url: modelState.url,
+        glb_url: modelState.url,
+        prompt: modelState.prompt
+      });
+    }
+
+    // Si hay una tarea activa en Tripo AI, consultar estado en tiempo real
+    if (modelState.taskId && (modelState.estado === 'generando' || modelState.estado === 'enviando')) {
+      const taskInfo = await getTripoTaskStatus(modelState.taskId);
+
+      if (taskInfo.status === 'success' && taskInfo.modelUrl) {
+        TRIPO_MODELS_STATE[prodId].estado = 'listo';
+        TRIPO_MODELS_STATE[prodId].url = taskInfo.modelUrl;
+        TRIPO_MODELS_STATE[prodId].glb_url = taskInfo.modelUrl;
+        saveTripoModelsState(TRIPO_MODELS_STATE);
+
+        try {
+          await supabase.from('producto').update({ model_3d_url: taskInfo.modelUrl }).eq('id_producto', prodId);
+        } catch (e) {}
+
+        return res.status(200).json({
+          estado: 'listo',
+          url: taskInfo.modelUrl,
+          glb_url: taskInfo.modelUrl,
+          prompt: modelState.prompt
+        });
+      } else if (taskInfo.status === 'failed') {
+        TRIPO_MODELS_STATE[prodId].estado = 'error';
+        saveTripoModelsState(TRIPO_MODELS_STATE);
+        return res.status(200).json({ estado: 'error', message: 'La generación 3D en Tripo AI falló.' });
+      } else {
+        return res.status(200).json({
+          estado: 'generando',
+          progress: taskInfo.progress,
+          message: `Generando estructura 3D en Tripo AI (${taskInfo.progress}%)...`
+        });
+      }
+    }
+
+    return res.status(200).json({
+      estado: modelState.estado || 'idle',
+      url: modelState.url || null,
+      glb_url: modelState.url || null
+    });
+  } catch (error) {
+    console.error('Error al consultar modelo 3D:', error);
+    return res.status(500).json({ message: 'Error interno al consultar modelo 3D.' });
+  }
+});
+
+// Regenerar o crear modelo 3D para un producto existente
+app.post('/api/admin/products/:id/regenerate-3d', requireAdmin, async (req, res) => {
+  const { id } = req.params;
+  const { prompt } = req.body;
+  const prodId = parseInt(id, 10);
+
+  if (!prompt || !prompt.trim()) {
+    return res.status(400).json({ message: 'El prompt descriptivo es obligatorio para generar el modelo 3D.' });
+  }
+
+  try {
+    const taskId = await startTripoTask(prompt);
+
+    TRIPO_MODELS_STATE[prodId] = {
+      taskId,
+      prompt,
+      estado: 'generando',
+      url: null,
+      updatedAt: new Date().toISOString()
+    };
+    saveTripoModelsState(TRIPO_MODELS_STATE);
+
+    return res.status(200).json({
+      ok: true,
+      message: 'Tarea de modelado 3D iniciada en Tripo AI con éxito.',
+      taskId,
+      productId: prodId
+    });
+  } catch (error) {
+    console.error('Error al iniciar regeneración 3D:', error);
+    return res.status(500).json({ message: error.message || 'Error al conectar con la API de Tripo AI.' });
+  }
 });
 
 app.listen(PORT, () => console.log(`🍦 Servidor en puerto ${PORT}`));
