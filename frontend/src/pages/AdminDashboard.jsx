@@ -23,6 +23,7 @@ const AdminDashboard = ({ user, onLogout }) => {
     // Si el usuario tiene rol admin, considerarlo siempre verificado (ya autenticó en login)
     return true;
   });
+  const [userToDelete, setUserToDelete] = useState(null);
   // --- New Admin Form States ---
   const [newAdminForm, setNewAdminForm] = useState({ name: '', lastName: '', email: '', password: '' });
   const [createAdminLoading, setCreateAdminLoading] = useState(false);
@@ -123,7 +124,8 @@ const AdminDashboard = ({ user, onLogout }) => {
     category: 'Clásico',
     description: '',
     image: '',
-    featured: false
+    featured: false,
+    stock: 50
   });
   const [createProductLoading, setCreateProductLoading] = useState(false);
   const [createProductMsg, setCreateProductMsg] = useState({ type: '', text: '' });
@@ -154,6 +156,54 @@ const AdminDashboard = ({ user, onLogout }) => {
   // --- Update Price State ---
   const [editingPrice, setEditingPrice] = useState(null); // { id, value }
   const [updatingPrice, setUpdatingPrice] = useState(null);
+  
+  // --- Update Stock State ---
+  const [editingStock, setEditingStock] = useState(null); // { id, value }
+  const [updatingStock, setUpdatingStock] = useState(null);
+
+  const handleSaveStock = async (productId, newStockValue) => {
+    const numStock = parseInt(newStockValue, 10);
+    if (isNaN(numStock) || numStock < 0) {
+      alert('El stock disponible debe ser un número entero mayor o igual a 0.');
+      setEditingStock(null);
+      return;
+    }
+
+    setUpdatingStock(productId);
+    setEditingStock(null);
+
+    // Actualización optimista de la UI
+    setDashboardData(prev => ({
+      ...prev,
+      products: (prev.products || []).map(p => String(p.id) === String(productId) ? { ...p, stock: numStock } : p)
+    }));
+
+    try {
+      const res = await apiFetch(`/api/admin/products/${productId}/stock`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ stock: numStock })
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        alert(data.message || 'Error al actualizar el stock disponible.');
+        fetchDashboardData();
+      }
+    } catch (err) {
+      console.error('Error actualizando stock:', err);
+      alert('Error de conexión al actualizar el stock disponible.');
+      fetchDashboardData();
+    } finally {
+      setUpdatingStock(null);
+    }
+  };
+
+  const handleStepStock = (productId, currentStock, delta) => {
+    const stockVal = currentStock !== undefined && currentStock !== null ? Number(currentStock) : 50;
+    const newStock = Math.max(0, stockVal + delta);
+    handleSaveStock(productId, newStock);
+  };
+
   const [updatingSaleStatus, setUpdatingSaleStatus] = useState(null);
 
   const handleUpdateSaleStatus = async (saleId, newStatus) => {
@@ -237,7 +287,8 @@ const AdminDashboard = ({ user, onLogout }) => {
           category: 'Clásico',
           description: '',
           image: '',
-          featured: false
+          featured: false,
+          stock: 50
         });
         setCreateProductMsg({ type: '', text: '' });
       }, 900);
@@ -417,29 +468,36 @@ const AdminDashboard = ({ user, onLogout }) => {
     }
   };
 
-  const handleDeleteUser = async (id) => {
-    if (!window.confirm('¿Estás seguro de eliminar este usuario? Esta acción no se puede deshacer.')) return;
+  const handleDeleteUser = (userObj) => {
+    setUserToDelete(userObj);
+  };
+
+  const executeDeleteUser = async () => {
+    if (!userToDelete) return;
+    const id = userToDelete.id_usuario || userToDelete.id;
     
     setActionLoading(id);
     try {
       const res = await apiFetch(`/api/admin/users/${id}`, {
         method: 'DELETE'
       });
+      const data = await res.json().catch(() => ({}));
       if (res.ok) {
         setDashboardData(prev => ({
           ...prev,
-          users: prev.users.filter(u => (u.id_usuario || u.id) !== id),
-          stats: { ...prev.stats, activeUsers: prev.stats.activeUsers - 1 }
+          users: prev.users.filter(u => String(u.id_usuario || u.id) !== String(id)),
+          stats: { ...prev.stats, activeUsers: Math.max(0, (prev.stats?.activeUsers || 0) - 1) }
         }));
+        setUserToDelete(null);
       } else {
-        const data = await res.json().catch(() => ({}));
-        alert(data.message || 'Error al eliminar usuario');
+        alert(data.message || `Error al eliminar usuario (${res.status})`);
         if (res.status === 401) {
           setIsQrVerified(false);
         }
       }
     } catch (err) {
-      alert('Error al eliminar usuario');
+      console.error('Error al eliminar usuario:', err);
+      alert('Error de conexión al intentar eliminar usuario.');
     } finally {
       setActionLoading(null);
     }
@@ -885,25 +943,25 @@ const AdminDashboard = ({ user, onLogout }) => {
                     const savedUserStr = typeof window !== 'undefined' ? (localStorage.getItem('superGelatto_user') || sessionStorage.getItem('superGelatto_user')) : null;
                     const savedUser = savedUserStr ? JSON.parse(savedUserStr) : null;
                     const activeUser = user || savedUser;
-                    const currentUserEmail = (activeUser?.email || '').toLowerCase();
-                    const isCurrentUserSuperAdmin = currentUserEmail === SUPER_ADMIN_EMAIL;
+                    const currentUserEmail = (activeUser?.email || activeUser?.user?.email || '').toLowerCase().trim();
+                    const isCurrentUserSuperAdmin = currentUserEmail === SUPER_ADMIN_EMAIL || activeUser?.rol === 'super_admin';
 
-                    const targetEmail = (u.email || '').toLowerCase();
-                    const isTargetSuperAdmin = targetEmail === SUPER_ADMIN_EMAIL;
+                    const targetEmail = (u.email || '').toLowerCase().trim();
+                    const isTargetSuperAdmin = targetEmail === SUPER_ADMIN_EMAIL || u.rol === 'super_admin';
                     const isTargetAdmin = u.rol === 'admin';
 
                     // Modificación de Rol:
-                    // 1. Nadie puede cambiar el rol del Super Admin principal.
-                    // 2. Si el objetivo es Administrador, SOLO el Super Admin (muneracristian63@gmail.com) puede cambiar su rol (bajarlo a cliente).
+                    // 1. Nadie puede cambiar el rol del Super Admin principal (muneracristian63@gmail.com).
+                    // 2. Si el objetivo es Administrador, SOLO el Super Admin (muneracristian63@gmail.com) puede cambiar su rol.
                     // 3. Si el objetivo es Cliente, cualquier Administrador puede ascenderlo a admin.
                     const canEditRole = !isTargetSuperAdmin && (!isTargetAdmin || isCurrentUserSuperAdmin);
 
                     // Eliminación de Usuario:
-                    // 1. Nadie puede eliminar la cuenta del Super Admin principal.
-                    // 2. Si el objetivo es Administrador, SOLO el Super Admin puede eliminarlo (y no a sí mismo).
-                    // 3. Si el objetivo es Cliente, cualquier Administrador puede eliminarlo.
+                    // 1. Nadie puede eliminar la cuenta principal del Super Admin (muneracristian63@gmail.com).
+                    // 2. Si el objetivo es Administrador, SOLO la cuenta de Super Admin (muneracristian63@gmail.com) puede eliminarlo.
+                    // 3. Si el objetivo es Cliente, cualquier Administrador (Super Admin o Admin normal) puede eliminarlo.
                     const canDeleteUser = !isTargetSuperAdmin && (
-                      !isTargetAdmin || (isTargetAdmin && isCurrentUserSuperAdmin && String(userId) !== String(activeUser?.id_usuario || activeUser?.id))
+                      !isTargetAdmin || (isTargetAdmin && isCurrentUserSuperAdmin && String(userId) !== String(activeUser?.id_usuario || activeUser?.id || activeUser?.user?.id))
                     );
 
                     return (
@@ -923,7 +981,7 @@ const AdminDashboard = ({ user, onLogout }) => {
                             value={u.rol || 'cliente'}
                             disabled={!canEditRole || actionLoading === `role-${userId}`}
                             onChange={(e) => handleUpdateRole(userId, e.target.value)}
-                            title={!canEditRole ? (isTargetSuperAdmin ? 'Cuenta principal protegida' : 'Solo la cuenta principal de Super Admin puede cambiar el rol de un administrador') : 'Cambiar rol'}
+                            title={!canEditRole ? (isTargetSuperAdmin ? 'Cuenta principal protegida' : 'Solo la cuenta de Super Admin (muneracristian63@gmail.com) puede cambiar el rol de un administrador') : 'Cambiar rol'}
                             className={`px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider focus:outline-none transition-all ${
                               !canEditRole ? 'opacity-60 cursor-not-allowed ' : 'cursor-pointer '
                             }${
@@ -941,14 +999,19 @@ const AdminDashboard = ({ user, onLogout }) => {
                           {canDeleteUser ? (
                             <button 
                               disabled={actionLoading === (u.id_usuario || u.id)}
-                              onClick={() => handleDeleteUser(u.id_usuario || u.id)}
+                              onClick={() => handleDeleteUser(u)}
                               className="p-2 text-white/20 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all cursor-pointer"
                               title={u.rol === 'admin' ? "Eliminar cuenta de administrador" : "Eliminar cuenta de cliente"}
                             >
                               {actionLoading === (u.id_usuario || u.id) ? <RefreshCw className="animate-spin" size={18} /> : <Trash2 size={18} />}
                             </button>
                           ) : (
-                            <span className="text-[10px] text-white/20 font-mono uppercase tracking-wider select-none">Protegido</span>
+                            <span 
+                              className="text-[10px] text-white/20 font-mono uppercase tracking-wider select-none"
+                              title={isTargetSuperAdmin ? "La cuenta principal de Super Admin está protegida y no se puede eliminar" : "Solo la cuenta principal de Super Admin (muneracristian63@gmail.com) puede eliminar administradores"}
+                            >
+                              Protegido
+                            </span>
                           )}
                         </td>
                       </tr>
@@ -1097,96 +1160,151 @@ const AdminDashboard = ({ user, onLogout }) => {
                     <th className="p-6">Sabor / Producto</th>
                     <th className="p-6">Precio</th>
                     <th className="p-6">Categoría</th>
+                    <th className="p-6">Stock Disponible</th>
                     <th className="p-6">Destacado</th>
                     <th className="p-6 text-right">Acciones</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/5">
-                  {dashboardData.products.map(p => (
-                    <tr key={p.id} className="hover:bg-white/[0.02] transition-colors group">
-                      <td className="p-6 text-white/20 font-mono text-xs">PROD-{p.id}</td>
-                      <td className="p-6">
-                        <div className="flex items-center gap-4">
-                          <div className="relative group/img cursor-pointer" onClick={() => handleOpenImageModal(p)}>
-                            <img src={p.image} alt="" className="w-12 h-12 rounded-xl object-cover border border-white/10 group-hover/img:brightness-75 transition-all" />
-                            <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover/img:opacity-100 transition-opacity bg-black/40 rounded-xl">
-                              <Camera size={14} className="text-white" />
+                  {dashboardData.products.map(p => {
+                    const currentStock = p.stock !== undefined && p.stock !== null ? Number(p.stock) : 50;
+                    return (
+                      <tr key={p.id} className="hover:bg-white/[0.02] transition-colors group">
+                        <td className="p-6 text-white/20 font-mono text-xs">PROD-{p.id}</td>
+                        <td className="p-6">
+                          <div className="flex items-center gap-4">
+                            <div className="relative group/img cursor-pointer" onClick={() => handleOpenImageModal(p)}>
+                              <img src={p.image} alt="" className="w-12 h-12 rounded-xl object-cover border border-white/10 group-hover/img:brightness-75 transition-all" />
+                              <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover/img:opacity-100 transition-opacity bg-black/40 rounded-xl">
+                                <Camera size={14} className="text-white" />
+                              </div>
+                            </div>
+                            <div>
+                              <p className="font-medium text-white flex items-center gap-2">
+                                {p.name}
+                                {p.destacado && (
+                                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-gold-premium/20 text-gold-premium border border-gold-premium/30 font-bold flex items-center gap-1">
+                                    <Star size={10} className="fill-gold-premium" /> Destacado
+                                  </span>
+                                )}
+                              </p>
+                              <p className="text-[10px] text-white/40 line-clamp-1 max-w-[220px]">{p.desc}</p>
                             </div>
                           </div>
-                          <div>
-                            <p className="font-medium text-white flex items-center gap-2">
-                              {p.name}
-                              {p.destacado && (
-                                <span className="text-[10px] px-2 py-0.5 rounded-full bg-gold-premium/20 text-gold-premium border border-gold-premium/30 font-bold flex items-center gap-1">
-                                  <Star size={10} className="fill-gold-premium" /> Destacado
-                                </span>
-                              )}
-                            </p>
-                            <p className="text-[10px] text-white/40 line-clamp-1 max-w-[220px]">{p.desc}</p>
+                        </td>
+                        <td className="p-4">
+                          {editingPrice && String(editingPrice.id) === String(p.id) ? (
+                            <div className="flex items-center gap-1">
+                              <span className="text-white/40 text-xs">$</span>
+                              <input
+                                type="number"
+                                autoFocus
+                                value={editingPrice.value}
+                                onChange={(e) => setEditingPrice({ id: p.id, value: e.target.value })}
+                                onBlur={() => handleSavePrice(p.id)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') handleSavePrice(p.id);
+                                  if (e.key === 'Escape') setEditingPrice(null);
+                                }}
+                                className="w-24 bg-[#1a1a1a] border border-gold-premium/40 rounded-lg px-2 py-1 text-gold-premium font-bold text-xs focus:outline-none focus:border-gold-premium"
+                              />
+                            </div>
+                          ) : (
+                            <button
+                              onClick={() => setEditingPrice({ id: p.id, value: p.precio })}
+                              className="group/price flex items-center gap-1.5 font-bold text-gold-premium tracking-tight hover:text-amber-300 transition-colors cursor-pointer"
+                              title="Haz clic para editar el precio"
+                            >
+                              {updatingPrice === p.id
+                                ? <RefreshCw size={12} className="animate-spin text-gold-premium" />
+                                : null
+                              }
+                              {formatCurrency(p.precio)}
+                              <span className="opacity-0 group-hover/price:opacity-100 text-[9px] text-white/30 transition-opacity">✏️</span>
+                            </button>
+                          )}
+                        </td>
+                        <td className="p-4">
+                          <div className="relative">
+                            <select
+                              value={p.categoria || 'Clásico'}
+                              onChange={(e) => handleUpdateCategory(p.id, e.target.value)}
+                              disabled={updatingCategory === p.id}
+                              style={{ backgroundColor: '#111', color: p.categoria === 'Vegano' ? '#86efac' : p.categoria === 'Temporada' ? '#f9a8d4' : p.categoria === 'Gourmet' ? '#c4b5fd' : '#D4AF37' }}
+                              className={`appearance-none border rounded-xl px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider focus:outline-none cursor-pointer transition-all pr-7 ${
+                                updatingCategory === p.id ? 'opacity-50' : ''
+                              } ${
+                                (p.categoria === 'Vegano') ? 'border-green-500/30' :
+                                (p.categoria === 'Temporada') ? 'border-pink-400/30' :
+                                (p.categoria === 'Gourmet') ? 'border-purple-400/30' :
+                                'border-gold-premium/30'
+                              }`}
+                            >
+                              <option value="Clásico" style={{backgroundColor:'#111',color:'#D4AF37'}}>Clásico</option>
+                              <option value="Vegano" style={{backgroundColor:'#111',color:'#86efac'}}>Vegano</option>
+                              <option value="Temporada" style={{backgroundColor:'#111',color:'#f9a8d4'}}>Temporada</option>
+                              <option value="Gourmet" style={{backgroundColor:'#111',color:'#c4b5fd'}}>Gourmet</option>
+                            </select>
+                            <div className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-white/30">
+                              {updatingCategory === p.id
+                                ? <RefreshCw size={10} className="animate-spin" />
+                                : <span style={{fontSize:8}}>▼</span>
+                              }
+                            </div>
                           </div>
-                        </div>
-                      </td>
-                      <td className="p-4">
-                        {editingPrice && String(editingPrice.id) === String(p.id) ? (
-                          <div className="flex items-center gap-1">
-                            <span className="text-white/40 text-xs">$</span>
-                            <input
-                              type="number"
-                              autoFocus
-                              value={editingPrice.value}
-                              onChange={(e) => setEditingPrice({ id: p.id, value: e.target.value })}
-                              onBlur={() => handleSavePrice(p.id)}
-                              onKeyDown={(e) => {
-                                if (e.key === 'Enter') handleSavePrice(p.id);
-                                if (e.key === 'Escape') setEditingPrice(null);
-                              }}
-                              className="w-24 bg-[#1a1a1a] border border-gold-premium/40 rounded-lg px-2 py-1 text-gold-premium font-bold text-xs focus:outline-none focus:border-gold-premium"
-                            />
+                        </td>
+                        {/* CONTROL Y EDICIÓN DE STOCK */}
+                        <td className="p-4">
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              onClick={() => handleStepStock(p.id, currentStock, -1)}
+                              disabled={updatingStock === p.id}
+                              className="w-6 h-6 rounded-lg bg-white/5 hover:bg-white/15 border border-white/10 text-white/70 hover:text-white flex items-center justify-center text-xs font-bold transition-all cursor-pointer disabled:opacity-30 shrink-0"
+                              title="Disminuir stock disponible en 1"
+                            >
+                              -
+                            </button>
+                            {editingStock && String(editingStock.id) === String(p.id) ? (
+                              <input
+                                type="number"
+                                min="0"
+                                autoFocus
+                                value={editingStock.value}
+                                onChange={(e) => setEditingStock({ id: p.id, value: e.target.value })}
+                                onBlur={() => handleSaveStock(p.id, editingStock.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') handleSaveStock(p.id, editingStock.value);
+                                  if (e.key === 'Escape') setEditingStock(null);
+                                }}
+                                className="w-16 bg-[#1a1a1a] border border-gold-premium/40 rounded-lg px-2 py-1 text-center font-bold text-xs text-white focus:outline-none focus:border-gold-premium"
+                              />
+                            ) : (
+                              <button
+                                onClick={() => setEditingStock({ id: p.id, value: currentStock })}
+                                className={`px-2.5 py-1 rounded-lg text-xs font-bold border transition-all flex items-center gap-1.5 cursor-pointer ${
+                                  currentStock === 0
+                                    ? 'bg-red-500/20 text-red-400 border-red-500/30 hover:bg-red-500/30'
+                                    : currentStock <= 10
+                                    ? 'bg-amber-500/20 text-amber-400 border-amber-500/30 hover:bg-amber-500/30'
+                                    : 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/30'
+                                }`}
+                                title="Haz clic para escribir la cantidad exacta disponible"
+                              >
+                                {updatingStock === p.id && <RefreshCw size={10} className="animate-spin text-current" />}
+                                <span>{currentStock} u.</span>
+                                <span className="text-[9px] opacity-40">✏️</span>
+                              </button>
+                            )}
+                            <button
+                              onClick={() => handleStepStock(p.id, currentStock, 1)}
+                              disabled={updatingStock === p.id}
+                              className="w-6 h-6 rounded-lg bg-white/5 hover:bg-white/15 border border-white/10 text-white/70 hover:text-white flex items-center justify-center text-xs font-bold transition-all cursor-pointer disabled:opacity-30 shrink-0"
+                              title="Aumentar stock disponible en 1"
+                            >
+                              +
+                            </button>
                           </div>
-                        ) : (
-                          <button
-                            onClick={() => setEditingPrice({ id: p.id, value: p.precio })}
-                            className="group/price flex items-center gap-1.5 font-bold text-gold-premium tracking-tight hover:text-amber-300 transition-colors cursor-pointer"
-                            title="Haz clic para editar el precio"
-                          >
-                            {updatingPrice === p.id
-                              ? <RefreshCw size={12} className="animate-spin text-gold-premium" />
-                              : null
-                            }
-                            {formatCurrency(p.precio)}
-                            <span className="opacity-0 group-hover/price:opacity-100 text-[9px] text-white/30 transition-opacity">✏️</span>
-                          </button>
-                        )}
-                      </td>
-                      <td className="p-4">
-                        <div className="relative">
-                          <select
-                            value={p.categoria || 'Clásico'}
-                            onChange={(e) => handleUpdateCategory(p.id, e.target.value)}
-                            disabled={updatingCategory === p.id}
-                            style={{ backgroundColor: '#111', color: p.categoria === 'Vegano' ? '#86efac' : p.categoria === 'Temporada' ? '#f9a8d4' : p.categoria === 'Gourmet' ? '#c4b5fd' : '#D4AF37' }}
-                            className={`appearance-none border rounded-xl px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider focus:outline-none cursor-pointer transition-all pr-7 ${
-                              updatingCategory === p.id ? 'opacity-50' : ''
-                            } ${
-                              (p.categoria === 'Vegano') ? 'border-green-500/30' :
-                              (p.categoria === 'Temporada') ? 'border-pink-400/30' :
-                              (p.categoria === 'Gourmet') ? 'border-purple-400/30' :
-                              'border-gold-premium/30'
-                            }`}
-                          >
-                            <option value="Clásico" style={{backgroundColor:'#111',color:'#D4AF37'}}>Clásico</option>
-                            <option value="Vegano" style={{backgroundColor:'#111',color:'#86efac'}}>Vegano</option>
-                            <option value="Temporada" style={{backgroundColor:'#111',color:'#f9a8d4'}}>Temporada</option>
-                            <option value="Gourmet" style={{backgroundColor:'#111',color:'#c4b5fd'}}>Gourmet</option>
-                          </select>
-                          <div className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-white/30">
-                            {updatingCategory === p.id
-                              ? <RefreshCw size={10} className="animate-spin" />
-                              : <span style={{fontSize:8}}>▼</span>
-                            }
-                          </div>
-                        </div>
-                      </td>
+                        </td>
                       <td className="p-6">
                         <button
                           onClick={() => handleToggleFeatured(p.id, p.destacado)}
@@ -1230,8 +1348,9 @@ const AdminDashboard = ({ user, onLogout }) => {
                         </div>
                       </td>
                     </tr>
-                  ))}
-                </tbody>
+                  );
+                })}
+              </tbody>
               </table>
               {dashboardData.products.length === 0 && <div className="p-20 text-center text-white/20">No hay productos en el catálogo</div>}
             </div>
@@ -1863,7 +1982,7 @@ const AdminDashboard = ({ user, onLogout }) => {
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-3 gap-3">
                 <div>
                   <label className="block text-xs uppercase tracking-wider text-white/40 mb-2 font-bold">
                     Precio (COP) *
@@ -1874,7 +1993,22 @@ const AdminDashboard = ({ user, onLogout }) => {
                     placeholder="13000"
                     value={createProductForm.price}
                     onChange={(e) => setCreateProductForm(prev => ({ ...prev, price: e.target.value }))}
-                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-gold-premium/40 transition-colors text-sm"
+                    className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-white focus:outline-none focus:border-gold-premium/40 transition-colors text-sm"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs uppercase tracking-wider text-white/40 mb-2 font-bold">
+                    Stock Inicial *
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    required
+                    placeholder="50"
+                    value={createProductForm.stock}
+                    onChange={(e) => setCreateProductForm(prev => ({ ...prev, stock: e.target.value }))}
+                    className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-white focus:outline-none focus:border-gold-premium/40 transition-colors text-sm font-bold text-emerald-400"
                   />
                 </div>
 
@@ -1885,7 +2019,7 @@ const AdminDashboard = ({ user, onLogout }) => {
                   <select
                     value={createProductForm.category}
                     onChange={(e) => setCreateProductForm(prev => ({ ...prev, category: e.target.value }))}
-                    className="w-full bg-[#181818] border border-white/10 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-gold-premium/40 text-sm cursor-pointer"
+                    className="w-full bg-[#181818] border border-white/10 rounded-xl px-3 py-2.5 text-white focus:outline-none focus:border-gold-premium/40 text-sm cursor-pointer"
                   >
                     <option value="Clásico">Clásico</option>
                     <option value="Vegano">Vegano</option>
@@ -1977,6 +2111,49 @@ const AdminDashboard = ({ user, onLogout }) => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DE CONFIRMACIÓN DE ELIMINACIÓN DE USUARIO */}
+      {userToDelete && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-[#0b0b0f] border border-red-500/30 rounded-3xl p-8 max-w-md w-full shadow-2xl relative">
+            <button
+              onClick={() => setUserToDelete(null)}
+              className="absolute top-6 right-6 text-white/40 hover:text-white transition-colors cursor-pointer"
+            >
+              <X size={20} />
+            </button>
+            <div className="w-14 h-14 rounded-2xl bg-red-500/10 border border-red-500/30 text-red-400 flex items-center justify-center mb-6">
+              <Trash2 size={28} />
+            </div>
+            <h3 className="text-xl font-bold text-white mb-2">¿Eliminar esta cuenta?</h3>
+            <p className="text-white/70 text-sm mb-4">
+              Estás a punto de eliminar a <strong className="text-white">{userToDelete.nombre} {userToDelete.apellido}</strong> ({userToDelete.email}).
+            </p>
+            <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-xl text-red-300 text-xs mb-6">
+              ⚠️ Esta acción eliminará permanentemente la cuenta y no se puede deshacer.
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                type="button"
+                onClick={() => setUserToDelete(null)}
+                className="w-1/2 py-3 bg-white/5 hover:bg-white/10 text-white/70 font-bold text-xs rounded-xl transition-all cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={actionLoading === (userToDelete.id_usuario || userToDelete.id)}
+                onClick={executeDeleteUser}
+                className="w-1/2 py-3 bg-red-600 hover:bg-red-500 text-white font-bold text-xs rounded-xl shadow-lg hover:shadow-red-600/30 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+              >
+                {actionLoading === (userToDelete.id_usuario || userToDelete.id) ? <RefreshCw className="animate-spin" size={16} /> : <Trash2 size={16} />}
+                Sí, eliminar
+              </button>
+            </div>
           </div>
         </div>
       )}

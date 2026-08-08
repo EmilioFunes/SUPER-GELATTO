@@ -1280,7 +1280,8 @@ app.get('/api/admin/dashboard', requireAdmin, async (req, res) => {
           desc: p.descripcion,
           image: p.imagen || getProductImage(p.nombre),
           categoria: p.categoria || 'Clásico',
-          destacado: Boolean(p.destacado !== undefined ? p.destacado : false)
+          destacado: Boolean(p.destacado !== undefined ? p.destacado : false),
+          stock: p.stock !== undefined && p.stock !== null ? Number(p.stock) : (p.stock_disponible !== undefined && p.stock_disponible !== null ? Number(p.stock_disponible) : 50)
         }));
       } else {
         products = FALLBACK_PRODUCTS.map(p => ({
@@ -1290,7 +1291,8 @@ app.get('/api/admin/dashboard', requireAdmin, async (req, res) => {
           desc: p.descripcion,
           image: p.imagen || getProductImage(p.nombre),
           categoria: p.categoria || 'Clásico',
-          destacado: Boolean(p.destacado !== undefined ? p.destacado : false)
+          destacado: Boolean(p.destacado !== undefined ? p.destacado : false),
+          stock: p.stock !== undefined && p.stock !== null ? Number(p.stock) : 50
         }));
       }
     } catch (e) {
@@ -1301,7 +1303,8 @@ app.get('/api/admin/dashboard', requireAdmin, async (req, res) => {
         desc: p.descripcion,
         image: p.imagen || getProductImage(p.nombre),
         categoria: p.categoria || 'Clásico',
-        destacado: Boolean(p.destacado !== undefined ? p.destacado : false)
+        destacado: Boolean(p.destacado !== undefined ? p.destacado : false),
+        stock: p.stock !== undefined && p.stock !== null ? Number(p.stock) : 50
       }));
     }
 
@@ -1329,34 +1332,61 @@ const SUPER_ADMIN_EMAIL = 'muneracristian63@gmail.com';
 
 app.delete('/api/admin/users/:id', requireAdmin, async (req, res) => {
   const { id } = req.params;
-  const requesterEmail = (req.user?.email || '').toLowerCase();
+  let requesterEmail = (req.user?.email || '').toLowerCase().trim();
 
   try {
+    if (!requesterEmail && req.user?.id_usuario) {
+      const { data: reqUserData } = await supabase.from('usuario').select('email').eq('id_usuario', req.user.id_usuario).single();
+      if (reqUserData?.email) {
+        requesterEmail = reqUserData.email.toLowerCase().trim();
+      }
+    }
+
     const { data: targetUser } = await supabase.from('usuario').select('*').eq('id_usuario', id).single();
 
     if (!targetUser) {
       return res.status(404).json({ message: 'Usuario no encontrado.' });
     }
 
+    const targetEmail = (targetUser.email || '').toLowerCase().trim();
+    const isTargetSuperAdmin = targetEmail === SUPER_ADMIN_EMAIL || targetUser.rol === 'super_admin';
+
     // No se permite eliminar la cuenta principal de super administrador
-    if ((targetUser.email || '').toLowerCase() === SUPER_ADMIN_EMAIL) {
+    if (isTargetSuperAdmin) {
       return res.status(403).json({ message: 'Acceso denegado. La cuenta principal de super administrador está protegida y no se puede eliminar.' });
     }
 
-    // Si el usuario a eliminar es un administrador:
-    // Solo el super administrador (muneracristian63@gmail.com) puede eliminarlo.
-    if (targetUser.rol === 'admin' && requesterEmail !== SUPER_ADMIN_EMAIL) {
+    // Permisos de eliminación:
+    // - Super Admin: Puede eliminar tanto cuentas de administrador como de clientes.
+    // - Admin normal: Solo puede eliminar cuentas de clientes, NO otros administradores.
+    const isTargetAdmin = targetUser.rol === 'admin';
+    const isRequesterSuperAdmin = requesterEmail === SUPER_ADMIN_EMAIL;
+
+    if (isTargetAdmin && !isRequesterSuperAdmin) {
       return res.status(403).json({ 
-        message: 'Acceso denegado. Solo la cuenta principal de super administrador (muneracristian63@gmail.com) puede eliminar usuarios administradores.' 
+        message: 'Acceso denegado. Solo la cuenta principal de Super Administrador puede eliminar usuarios administradores.' 
       });
     }
 
+    // Limpiar o desvincular registros dependientes en otras tablas para evitar errores de clave foránea (FK)
+    try {
+      await supabase.from('admin_face_rekognition').delete().eq('id_usuario', id);
+      await supabase.from('admin_face_credentials').delete().eq('id_usuario', id);
+      await supabase.from('admin_webauthn_challenges').delete().eq('id_usuario', id);
+      await supabase.from('venta').update({ id_usuario: null }).eq('id_usuario', id);
+    } catch (cleanupErr) {
+      console.warn('Advertencia al limpiar datos asociados del usuario:', cleanupErr.message);
+    }
+
     const { error } = await supabase.from('usuario').delete().eq('id_usuario', id);
-    if (error) throw error;
+    if (error) {
+      console.error('Error en Supabase al eliminar usuario:', error);
+      throw error;
+    }
     return res.status(200).json({ message: 'Usuario eliminado correctamente.' });
   } catch (error) {
     console.error('Error al eliminar usuario:', error);
-    return res.status(500).json({ message: 'Error al eliminar usuario.' });
+    return res.status(500).json({ message: error.message || 'Error al eliminar usuario.' });
   }
 });
 
@@ -1470,7 +1500,7 @@ app.post('/api/admin/create-admin', requireAdmin, async (req, res) => {
 // pero dejamos el endpoint preparado.
 // Endpoint para agregar un nuevo producto al catálogo
 app.post('/api/admin/products', requireAdmin, async (req, res) => {
-  let { name, description, price, category, image, featured } = req.body;
+  let { name, description, price, category, image, featured, stock } = req.body;
 
   if (!name || !price) {
     return res.status(400).json({ message: 'El nombre y el precio del producto son obligatorios.' });
@@ -1480,6 +1510,8 @@ app.post('/api/admin/products', requireAdmin, async (req, res) => {
   if (isNaN(numPrice) || numPrice <= 0) {
     return res.status(400).json({ message: 'El precio debe ser un número mayor a 0.' });
   }
+
+  const numStock = stock !== undefined && stock !== null && !isNaN(parseInt(stock, 10)) ? Math.max(0, parseInt(stock, 10)) : 50;
 
   try {
     const nextId = Date.now();
@@ -1496,6 +1528,8 @@ app.post('/api/admin/products', requireAdmin, async (req, res) => {
       imagen: finalImage,
       categoria: cat,
       destacado: isFeatured,
+      stock: numStock,
+      stock_disponible: numStock,
       estado: true,
       rating: 4.9,
       reviews: 1
@@ -1519,7 +1553,8 @@ app.post('/api/admin/products', requireAdmin, async (req, res) => {
       desc: desc,
       image: finalImage,
       categoria: cat,
-      destacado: isFeatured
+      destacado: isFeatured,
+      stock: numStock
     };
 
     return res.status(201).json({
@@ -1672,6 +1707,41 @@ app.put('/api/admin/products/:id/category', requireAdmin, async (req, res) => {
   } catch (error) {
     console.error('Error al actualizar categoría:', error);
     return res.status(500).json({ message: 'Error al actualizar la categoría.' });
+  }
+});
+
+// Actualizar stock del producto
+app.put('/api/admin/products/:id/stock', requireAdmin, async (req, res) => {
+  const { id } = req.params;
+  const { stock } = req.body;
+  const numStock = parseInt(stock, 10);
+
+  if (isNaN(numStock) || numStock < 0) {
+    return res.status(400).json({ message: 'El stock debe ser un número entero mayor o igual a 0.' });
+  }
+
+  try {
+    const prodId = parseInt(id, 10);
+
+    // Actualizar en fallback en memoria
+    const fbItem = FALLBACK_PRODUCTS.find(p => p.id_producto === prodId);
+    if (fbItem) {
+      fbItem.stock = numStock;
+      fbItem.stock_disponible = numStock;
+    }
+
+    // Intentar Supabase
+    try {
+      await supabase.from('producto').update({ stock: numStock, stock_disponible: numStock }).eq('id_producto', prodId);
+    } catch (e) {
+      console.warn('Advertencia Supabase al actualizar stock:', e.message);
+    }
+
+    console.log(`✅ Producto ${prodId} stock=${numStock} actualizado.`);
+    return res.status(200).json({ ok: true, message: 'Stock disponible actualizado con éxito.', id: prodId, stock: numStock });
+  } catch (error) {
+    console.error('Error al actualizar stock:', error);
+    return res.status(500).json({ message: 'Error al actualizar el stock disponible.' });
   }
 });
 

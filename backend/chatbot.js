@@ -161,13 +161,36 @@ const functions = {
     return { count: sales.length, sales };
   },
 
-  deleteUser: async (supabase, identifier) => {
-    console.log(`🏎️ Tool: deleteUser → ${identifier}`);
+  deleteUser: async (supabase, identifier, requesterEmail = '') => {
+    console.log(`🏎️ Tool: deleteUser → ${identifier} (solicitado por: ${requesterEmail})`);
     const isEmail = identifier.includes('@');
-    const { error } = await supabase.from('usuario').delete().eq(isEmail ? 'email' : 'id_usuario', identifier);
+    
+    // Obtener usuario objetivo
+    const { data: targetUser } = await supabase.from('usuario')
+      .select('*')
+      .eq(isEmail ? 'email' : 'id_usuario', identifier)
+      .single();
+
+    if (!targetUser) {
+      return { error: "Usuario no encontrado." };
+    }
+
+    const SUPER_ADMIN_EMAIL = 'muneracristian63@gmail.com';
+    const targetEmail = (targetUser.email || '').toLowerCase().trim();
+    const cleanRequesterEmail = (requesterEmail || '').toLowerCase().trim();
+
+    if (targetEmail === SUPER_ADMIN_EMAIL || targetUser.rol === 'super_admin') {
+      return { error: "Acceso denegado. La cuenta principal de super administrador está protegida y no se puede eliminar." };
+    }
+
+    if (targetUser.rol === 'admin' && cleanRequesterEmail !== SUPER_ADMIN_EMAIL) {
+      return { error: "Acceso denegado. Solo la cuenta principal de Super Administrador puede eliminar usuarios administradores." };
+    }
+
+    const { error } = await supabase.from('usuario').delete().eq('id_usuario', targetUser.id_usuario);
     return error
       ? { error: "Error al eliminar usuario.", detalle: error.message }
-      : { success: true, message: `Usuario ${identifier} eliminado correctamente.` };
+      : { success: true, message: `Usuario ${targetUser.nombre || identifier} (${targetUser.email}) eliminado correctamente.` };
   },
 
   deleteProduct: async (supabase, id) => {
@@ -280,21 +303,22 @@ async function tryFastCartAdd(message, supabase) {
 // ── Controlador principal ────────────────────────────────────
 async function handleChatbotRequest(req, res, supabase) {
   const { message, userId, userName: bodyUserName, userRole: bodyUserRole, history = [] } = req.body;
-  console.log(`🤖 Chatbot request: "${message}" from user ${userId}`);
-
   try {
+    let userEmail = req.body.userEmail || '';
     let isAdmin = bodyUserRole === 'admin';
     let userName = bodyUserName || 'Gelattista';
 
-    // Evitamos consulta a Supabase si ya recibimos el rol del frontend
-    if (bodyUserRole === undefined && userId) {
+    if (userId) {
       const { data: user } = await supabase
         .from('usuario')
         .select('*')
         .eq('id_usuario', userId)
         .single();
-      isAdmin = user?.rol === 'admin';
-      userName = user?.nombre || 'Gelattista';
+      if (user) {
+        if (bodyUserRole === undefined) isAdmin = user.rol === 'admin';
+        if (!bodyUserName) userName = user.nombre || 'Gelattista';
+        if (!userEmail) userEmail = user.email || '';
+      }
     }
 
     // ── Fast-path para clientes: agregar al carrito sin LLM ──
@@ -475,7 +499,7 @@ USUARIO: ${userName} | role: "cliente"`;
               functionResponse = { error: "Acceso denegado." };
             } else {
               const args = JSON.parse(toolCall.function.arguments || '{}');
-              functionResponse = await functions.deleteUser(supabase, args.identifier);
+              functionResponse = await functions.deleteUser(supabase, args.identifier, userEmail);
             }
 
           } else if (functionName === "deleteProduct") {
