@@ -135,8 +135,12 @@ const Navbar = ({ user, onLogout }) => {
             <div className="flex items-center gap-5 pl-8 border-l border-white/5">
               <Link to="/perfil" className="flex items-center gap-3 group">
                 <div className="relative">
-                  <div className="w-9 h-9 rounded-full bg-gradient-to-br from-pastel-pink to-gold-premium flex items-center justify-center text-background-dark font-black text-sm ring-2 ring-white/5 group-hover:ring-gold-premium/40 transition-all shadow-lg shadow-gold-premium/10">
-                    {user?.name?.charAt(0).toUpperCase() || <User size={16} />}
+                  <div className="w-9 h-9 rounded-full bg-gradient-to-br from-pastel-pink to-gold-premium flex items-center justify-center text-background-dark font-black text-sm ring-2 ring-white/5 group-hover:ring-gold-premium/40 transition-all shadow-lg shadow-gold-premium/10 overflow-hidden">
+                    {user?.picture || user?.avatar ? (
+                      <img src={user.picture || user.avatar} alt="Avatar" className="w-full h-full object-cover rounded-full" />
+                    ) : (
+                      user?.name?.charAt(0).toUpperCase() || <User size={16} />
+                    )}
                   </div>
                   <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-green-500 border-2 border-background-dark rounded-full"></div>
                 </div>
@@ -226,8 +230,12 @@ const Navbar = ({ user, onLogout }) => {
                 <hr className="border-white/10 my-2" />
                 <div className="flex justify-between items-center">
                   <div className="flex items-center gap-2">
-                    <div className="w-10 h-10 rounded-full bg-gold-premium/20 flex items-center justify-center text-gold-premium font-bold">
-                      {user?.name?.charAt(0).toUpperCase()}
+                    <div className="w-10 h-10 rounded-full bg-gold-premium/20 flex items-center justify-center text-gold-premium font-bold overflow-hidden">
+                      {user?.picture || user?.avatar ? (
+                        <img src={user.picture || user.avatar} alt="Avatar" className="w-full h-full object-cover rounded-full" />
+                      ) : (
+                        user?.name?.charAt(0).toUpperCase()
+                      )}
                     </div>
                     <div>
                       <p className="text-white font-medium">{user?.name}</p>

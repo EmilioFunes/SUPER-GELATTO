@@ -1,11 +1,12 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Link, Navigate } from 'react-router-dom';
-import { User, Mail, Star, Package, CreditCard, ChevronRight, Edit2, Sparkles, Gift, Crown, Info, Loader2, Save, X, CheckCircle2, AlertCircle } from 'lucide-react';
+import { User, Mail, Star, Package, CreditCard, ChevronRight, Edit2, Sparkles, Gift, Crown, Info, Loader2, Save, X, CheckCircle2, AlertCircle, Camera } from 'lucide-react';
 
 const ProfilePage = ({ user, onUpdateUser }) => {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
+  const fileInputRef = useRef(null);
   
   // SI NO ESTÁ REGISTRADO (no tiene ID de base de datos), LO MANDAMOS A REGISTRARSE
   if (!user?.id) {
@@ -16,9 +17,34 @@ const ProfilePage = ({ user, onUpdateUser }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [editName, setEditName] = useState(user?.name || '');
   const [editEmail, setEditEmail] = useState(user?.email || '');
+  const [picture, setPicture] = useState(user?.picture || user?.avatar || '');
   const [updating, setUpdating] = useState(false);
   const [status, setStatus] = useState({ type: null, message: '' });
   const [errors, setErrors] = useState({});
+
+  const handleAvatarUpload = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      setStatus({ type: 'error', message: 'Por favor selecciona una imagen válida.' });
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = reader.result;
+      setPicture(dataUrl);
+      const updatedUserObj = { ...user, picture: dataUrl, avatar: dataUrl };
+      sessionStorage.setItem('superGelatto_user', JSON.stringify(updatedUserObj));
+      if (onUpdateUser) {
+        onUpdateUser(updatedUserObj);
+      }
+      setStatus({ type: 'success', message: '¡Foto de perfil cargada correctamente!' });
+      setTimeout(() => setStatus({ type: null, message: '' }), 3000);
+    };
+    reader.readAsDataURL(file);
+  };
 
   const handleKeyDownNoSpaces = (e) => {
     if (e.key === ' ' || e.keyCode === 32) {
@@ -111,7 +137,7 @@ const ProfilePage = ({ user, onUpdateUser }) => {
       const response = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/users/${user.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: editName, email: editEmail }),
+        body: JSON.stringify({ name: editName, email: editEmail, picture }),
       });
 
       const data = await response.json();
@@ -119,7 +145,7 @@ const ProfilePage = ({ user, onUpdateUser }) => {
       if (response.ok) {
         setStatus({ type: 'success', message: '¡Perfil actualizado con éxito!' });
         if (onUpdateUser) {
-          onUpdateUser(data.user);
+          onUpdateUser({ ...data.user, picture });
         }
         setTimeout(() => {
           setIsEditing(false);
@@ -143,17 +169,35 @@ const ProfilePage = ({ user, onUpdateUser }) => {
           {/* Sidebar Info */}
           <div className="lg:col-span-4 space-y-6">
             <div className="glass-card p-8 flex flex-col items-center">
-              <div className="relative group mb-6">
-                <div className="w-32 h-32 rounded-full bg-gradient-to-br from-pastel-pink to-gold-premium p-1 transition-transform group-hover:scale-105">
-                  <div className="w-full h-full rounded-full bg-background-dark flex items-center justify-center text-5xl font-bold">
-                    {editName?.charAt(0).toUpperCase() || user?.name?.charAt(0).toUpperCase() || 'U'}
+              <input 
+                type="file" 
+                ref={fileInputRef} 
+                onChange={handleAvatarUpload} 
+                accept="image/*" 
+                className="hidden" 
+              />
+              
+              <div 
+                className="relative group mb-6 cursor-pointer"
+                onClick={() => fileInputRef.current?.click()}
+                title="Haz clic para cambiar tu foto de perfil"
+              >
+                <div className="w-32 h-32 rounded-full bg-gradient-to-br from-pastel-pink to-gold-premium p-1 transition-transform group-hover:scale-105 shadow-2xl overflow-hidden">
+                  <div className="w-full h-full rounded-full bg-background-dark flex items-center justify-center text-5xl font-bold overflow-hidden relative">
+                    {picture ? (
+                      <img src={picture} alt="Foto de perfil" className="w-full h-full object-cover rounded-full" />
+                    ) : (
+                      editName?.charAt(0).toUpperCase() || user?.name?.charAt(0).toUpperCase() || 'U'
+                    )}
                   </div>
                 </div>
-                {isEditing && (
-                  <div className="absolute inset-0 flex items-center justify-center bg-black/40 rounded-full opacity-0 group-hover:opacity-100 transition-opacity">
-                    <Edit2 size={24} className="text-white" />
-                  </div>
-                )}
+                <div className="absolute bottom-1 right-1 p-2.5 rounded-full bg-gold-premium text-background-dark shadow-xl group-hover:scale-110 transition-all border-2 border-background-dark flex items-center justify-center">
+                  <Camera size={16} />
+                </div>
+                <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/60 rounded-full opacity-0 group-hover:opacity-100 transition-opacity p-2 text-center">
+                  <Camera size={22} className="text-gold-premium mb-1" />
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-white">Cambiar foto</span>
+                </div>
               </div>
 
               {!isEditing ? (

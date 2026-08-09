@@ -1,0 +1,1 @@
+[{"id_venta":1786290860730,"id_usuario":30,"total":42000,"fecha":"2026-08-09T15:54:20.730Z","estado":"En proceso","email":"realtimeadmin@test.com","nombre":"Venta Realtime Admin Test","deliveryDetails":{"fullName":"Venta Realtime Admin Test","email":"realtimeadmin@test.com"},"items":[{"name":"Gelato Chocolate","quantity":3,"price":14000}]}]

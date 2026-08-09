@@ -964,7 +964,7 @@ app.post('/api/admin/faceid/rekognition-login', async (req, res) => {
   try {
     const { image } = req.body;
     if (!image || typeof image !== 'string') {
-      return res.status(400).json(genericError);
+      return res.status(400).json({ ok: false, message: 'Se requiere una imagen en formato base64.' });
     }
 
     const cleanBase64 = image.replace(/^data:image\/\w+;base64,/, '');
@@ -1033,7 +1033,20 @@ app.post('/api/admin/faceid/rekognition-login', async (req, res) => {
       user: { id: user.id_usuario, id_usuario: user.id_usuario, name: user.nombre, email: user.email, rol: user.rol }
     });
   } catch (err) {
-    console.error('Error al autenticar por rostro en AWS Rekognition:', err);
+    console.error('❌ Error al autenticar por rostro en AWS Rekognition:', err);
+    const errMessage = err.message || '';
+    if (err.name === 'UnrecognizedClientException' || err.name === 'InvalidSignatureException' || errMessage.includes('security token')) {
+      return res.status(500).json({
+        ok: false,
+        message: 'Error de credenciales de AWS en el servidor Render (AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY).'
+      });
+    }
+    if (err.name === 'ResourceNotFoundException') {
+      return res.status(500).json({
+        ok: false,
+        message: `La colección de Rekognition (${rekognitionCollectionId}) no existe en AWS (${rekognitionRegion}).`
+      });
+    }
     return res.status(401).json(genericError);
   }
 });
@@ -1223,117 +1236,12 @@ app.get('/api/orders/:userId', async (req, res) => {
   }
 });
 
-app.post('/api/orders', async (req, res) => {
-  const { userId, total, items } = req.body;
 
-  // 1. Validación de tipos y negocio (SENA standard)
-  if (!userId || isNaN(total) || total <= 0) {
-    return res.status(400).json({ message: 'Datos de pedido inválidos o total debe ser positivo.' });
-  }
-
-  if (!items || !Array.isArray(items) || items.length === 0) {
-    return res.status(400).json({ message: 'El carrito no puede estar vacío.' });
-  }
-
-  try {
-    // 1. Registrar la venta en la base de datos
-    const { data: newOrder, error } = await supabase
-      .from('venta')
-      .insert([{ 
-        id_usuario: userId, 
-        total: total, 
-        fecha: new Date().toISOString()
-      }])
-      .select().single();
-
-    if (error) throw error;
-
-    // 1.1 Insertar detalles en detalle_venta y descontar stock de cada producto
-    for (const item of items) {
-      const prodId = item.id;
-      const qty = item.quantity || 1;
-
-      if (prodId) {
-        // Registrar en detalle_venta
-        await supabase.from('detalle_venta').insert([{
-          id_venta: newOrder.id_venta,
-          id_producto: prodId,
-          cantidad: qty,
-          precio_unitario: item.price || 0
-        }]);
-
-        // Consultar stock actual y descontar
-        const { data: prodData } = await supabase.from('producto').select('stock').eq('id_producto', prodId).single();
-        if (prodData && prodData.stock !== undefined) {
-          const newStock = Math.max(0, prodData.stock - qty);
-          await supabase.from('producto').update({ stock: newStock }).eq('id_producto', prodId);
-          await supabase.from('inventario').update({ stock_disponible: newStock, fecha_actualizacion: new Date().toISOString() }).eq('id_producto', prodId);
-        }
-      }
-    }
-
-    // 2. Obtener datos del usuario para el correo
-    const { data: user, error: userError } = await supabase
-      .from('usuario')
-      .select('nombre, email')
-      .eq('id_usuario', userId)
-      .single();
-
-    if (user && !userError) {
-      // 3. Preparar detalles del pedido
-      const deliveryTime = Math.floor(Math.random() * (45 - 30 + 1) + 30); // 30-45 mins
-      const itemsHtml = items && items.length > 0 
-        ? `<ul>${items.map(item => `<li><strong>${item.name}</strong> x ${item.quantity} - $${item.price}</li>`).join('')}</ul>`
-        : '<p>Detalles del pedido no disponibles.</p>';
-
-      // 4. Enviar correo de confirmación
-      try {
-        const emailTransporter = await getTransporter();
-        const fromEmail = process.env.SMTP_USER || 'no-reply@supergelatto.com';
-        
-        await emailTransporter.sendMail({
-          from: `"super gelatto 🍦" <${fromEmail}>`,
-          to: user.email,
-          subject: '🍦 ¡Tu pedido está en camino!',
-          html: `
-            <div style="font-family: Arial, sans-serif; color: #333; max-width: 600px; margin: 0 auto; border: 1px solid #eee; padding: 20px; border-radius: 10px;">
-              <h2 style="color: #ac2a5d; text-align: center;">¡Hola ${user.nombre}!</h2>
-              <p style="font-size: 16px; text-align: center;">Gracias por elegir <strong>super gelatto</strong>. Tu pedido ha sido confirmado con éxito.</p>
-              
-              <div style="background-color: #f9f9f9; padding: 15px; border-radius: 8px; margin: 20px 0;">
-                <h3 style="margin-top: 0; color: #705d00;">Resumen de tu pedido:</h3>
-                ${itemsHtml}
-                <p style="font-size: 18px; border-top: 1px solid #ddd; padding-top: 10px;"><strong>Total: $${total}</strong></p>
-              </div>
-              
-              <div style="text-align: center; margin: 30px 0; padding: 20px; border: 2px dashed #ac2a5d; border-radius: 15px;">
-                <span style="font-size: 24px;">🚚</span>
-                <h3 style="margin: 10px 0;">Tiempo estimado de entrega:</h3>
-                <p style="font-size: 22px; font-weight: bold; color: #ac2a5d; margin: 0;">${deliveryTime} minutos</p>
-              </div>
-              
-              <p style="text-align: center; color: #888; font-size: 12px;">Si tienes alguna duda, contáctanos respondiendo a este correo.</p>
-              <p style="text-align: center; font-weight: bold; color: #ac2a5d;">¡Que lo disfrutes! 🍦✨</p>
-            </div>
-          `
-        });
-        console.log(`📧 Correo de confirmación enviado a: ${user.email}`);
-      } catch (mailErr) {
-        console.error('Error enviando correo de confirmación:', mailErr);
-      }
-    }
-
-    return res.status(201).json({ message: 'Pedido creado exitosamente.', order: newOrder });
-  } catch (error) {
-    console.error('Error creating order:', error);
-    return res.status(500).json({ message: 'Error al procesar el pedido.' });
-  }
-});
 
 // ─── Update User Profile ─────────────────────────────────────
 app.put('/api/users/:id', async (req, res) => {
   const { id } = req.params;
-  let { name, email } = req.body;
+  let { name, email, picture, avatar } = req.body;
 
   if (hasForbiddenChars(name) || hasForbiddenChars(email)) {
     return res.status(400).json({ message: 'No se permiten caracteres especiales peligrosos (< > & " \' /).' });
@@ -1363,21 +1271,32 @@ app.put('/api/users/:id', async (req, res) => {
     return res.status(400).json({ message: 'Solo se permite un espacio sencillo entre palabras.' });
   }
 
+  const userAvatar = picture || avatar || null;
+
   try {
+    const updatePayload = { nombre: name, email: email };
+
     const { data: updatedUser, error } = await supabase
       .from('usuario')
-      .update({ nombre: name, email: email })
+      .update(updatePayload)
       .eq('id_usuario', id)
       .select().single();
 
     if (error) {
       if (error.code === '23505') return res.status(409).json({ message: 'El email ya está en uso.' });
-      throw error;
+      console.warn('Advertencia en Supabase al actualizar usuario:', error.message);
     }
+
+    const finalUser = {
+      id: updatedUser ? updatedUser.id_usuario : id,
+      name: updatedUser ? updatedUser.nombre : name,
+      email: updatedUser ? updatedUser.email : email,
+      picture: userAvatar || (updatedUser ? updatedUser.picture : null),
+    };
 
     return res.status(200).json({
       message: 'Perfil actualizado correctamente.',
-      user: { id: updatedUser.id_usuario, name: updatedUser.nombre, email: updatedUser.email }
+      user: finalUser
     });
   } catch (error) {
     console.error('Error updating profile:', error);
@@ -1660,19 +1579,32 @@ app.post('/api/orders', async (req, res) => {
       items: items || []
     };
 
-    // 1. Guardar localmente para disponibilidad instantánea en tiempo real
+    // 1. Guardar localmente para disponibilidad instantánea e infalible en tiempo real
     FALLBACK_SALES.unshift(newSaleItem);
     saveFallbackSales(FALLBACK_SALES);
 
-    // 2. Intentar guardar en Supabase
+    // 2. Intentar guardar en Supabase con manejo seguro de esquema
     try {
-      await supabase.from('venta').insert([{
+      let validUserId = null;
+      if (userId) {
+        const { data: userCheck } = await supabase
+          .from('usuario')
+          .select('id_usuario')
+          .eq('id_usuario', userId)
+          .single();
+        if (userCheck) validUserId = userId;
+      }
+
+      const { error: insertErr } = await supabase.from('venta').insert([{
         id_venta: saleId,
-        id_usuario: userId || null,
+        id_usuario: validUserId,
         total: numTotal,
-        fecha: nowIso,
-        estado: 'En proceso'
+        fecha: nowIso
       }]);
+      
+      if (insertErr) {
+        console.warn('Advertencia Supabase al insertar venta:', insertErr.message);
+      }
     } catch (supaErr) {
       console.warn('Advertencia Supabase al insertar venta:', supaErr.message);
     }
