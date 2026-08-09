@@ -4,7 +4,6 @@ import { Search, Star, SlidersHorizontal, ShoppingCart } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useCart } from '../context/CartContext';
 import FlavorModal from '../components/FlavorModal';
-import { FLAVORS } from '../data/flavors';
 
 const CATEGORIES = ['Todos', 'Clásico', 'Vegano', 'Temporada'];
 
@@ -13,7 +12,7 @@ const ProductsPage = ({ user }) => {
   const [selectedCategory, setSelectedCategory] = useState('Todos');
   const [selectedFlavor, setSelectedFlavor] = useState(null);
   const [sortBy, setSortBy] = useState('default');
-  const { addToCart } = useCart();
+  const { addToCart, showToast } = useCart();
   const navigate = useNavigate();
 
   const [flavors, setFlavors] = useState([]);
@@ -49,16 +48,16 @@ const ProductsPage = ({ user }) => {
   const handleQuickAdd = (flavor, e) => {
     e.stopPropagation();
     if (flavor.stock === 0) {
-      alert('¡Lo sentimos! Este sabor está actualmente agotado. 🍦');
+      if (showToast) showToast('¡Lo sentimos! Este sabor está actualmente agotado. 🍦', 'error');
       return;
     }
     if (!user?.id) {
-      alert('¡Vaya! Necesitas una cuenta registrada para realizar pedidos. Te llevamos al registro 🍦');
+      if (showToast) showToast('Necesitas una cuenta para realizar pedidos. Te llevamos al registro 🍦', 'info');
       navigate('/register');
       return;
     }
     addToCart({ ...flavor, precio: flavor.price }, 1);
-    alert(`¡${flavor.name} añadido al carrito! 🍦`);
+    if (showToast) showToast(`¡${flavor.name} añadido al carrito! 🍦`, 'success');
   };
 
   const filtered = useMemo(() => {
@@ -117,10 +116,10 @@ const ProductsPage = ({ user }) => {
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.15, duration: 0.5 }}
-          className="flex flex-col lg:flex-row gap-4 mb-12"
+          className="flex flex-col md:flex-row flex-wrap lg:flex-nowrap gap-3 sm:gap-4 mb-8 sm:mb-12 items-stretch"
         >
           {/* Search */}
-          <div className="relative group flex-1 max-w-sm">
+          <div className="relative group flex-1 w-full min-w-[240px]">
             <Search
               className="absolute left-4 top-1/2 -translate-y-1/2 text-white/30 group-focus-within:text-gold-premium transition-colors"
               size={18}
@@ -135,12 +134,12 @@ const ProductsPage = ({ user }) => {
           </div>
 
           {/* Category pills */}
-          <div className="flex bg-white/5 border border-white/10 rounded-xl p-1 gap-1">
+          <div className="flex bg-white/5 border border-white/10 rounded-xl p-1 gap-1 overflow-x-auto hide-scrollbar max-w-full">
             {CATEGORIES.map(cat => (
               <button
                 key={cat}
                 onClick={() => setSelectedCategory(cat)}
-                className={`px-4 py-2 rounded-lg text-xs font-bold transition-all whitespace-nowrap ${
+                className={`px-4 py-2 rounded-lg text-xs font-bold transition-all whitespace-nowrap min-h-[40px] flex items-center ${
                   selectedCategory === cat
                     ? 'bg-gold-premium text-background-dark shadow-lg shadow-gold-premium/20'
                     : 'text-white/50 hover:text-white'
@@ -152,23 +151,23 @@ const ProductsPage = ({ user }) => {
           </div>
 
           {/* Sort */}
-          <div className="flex items-center gap-2 bg-white/5 border border-white/10 rounded-xl px-4">
-            <SlidersHorizontal size={16} className="text-white/40" />
+          <div className="flex items-center gap-2 bg-white/5 border border-white/10 rounded-xl px-4 min-h-[44px]">
+            <SlidersHorizontal size={16} className="text-white/40 flex-shrink-0" />
             <select
               value={sortBy}
               onChange={e => setSortBy(e.target.value)}
-              className="bg-transparent text-xs font-bold text-white/60 focus:outline-none py-2 cursor-pointer"
+              className="bg-transparent text-xs font-bold text-white/60 focus:outline-none py-2 cursor-pointer w-full"
             >
-              <option value="default">Recomendados</option>
-              <option value="rating">Mayor valoración</option>
-              <option value="reviews">Más reseñas</option>
-              <option value="price-asc">Precio: menor a mayor</option>
-              <option value="price-desc">Precio: mayor a menor</option>
+              <option value="default" className="bg-background-dark text-white">Recomendados</option>
+              <option value="rating" className="bg-background-dark text-white">Mayor valoración</option>
+              <option value="reviews" className="bg-background-dark text-white">Más reseñas</option>
+              <option value="price-asc" className="bg-background-dark text-white">Precio: menor a mayor</option>
+              <option value="price-desc" className="bg-background-dark text-white">Precio: mayor a menor</option>
             </select>
           </div>
 
           {/* Count */}
-          <div className="flex items-center px-4 py-2 rounded-xl bg-white/5 border border-white/10 text-xs text-white/40 font-bold whitespace-nowrap">
+          <div className="flex items-center justify-center px-4 py-2 rounded-xl bg-white/5 border border-white/10 text-xs text-white/40 font-bold whitespace-nowrap min-h-[44px]">
             {filtered.length} resultado{filtered.length !== 1 ? 's' : ''}
           </div>
         </motion.div>

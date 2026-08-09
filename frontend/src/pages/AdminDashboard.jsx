@@ -9,6 +9,7 @@ import {
 import Model3DPreview from '../components/Model3DPreview';
 import CapturaFacial from '../components/CapturaFacial';
 import { apiFetch } from '../utils/api';
+import { useCart } from '../context/CartContext';
 
 const getProductFallbackImage = (name = '') => {
   const n = String(name).toLowerCase();
@@ -27,6 +28,7 @@ const getProductFallbackImage = (name = '') => {
 };
 
 const AdminDashboard = ({ user, onLogout }) => {
+  const { showToast } = useCart();
   const [dashboardData, setDashboardData] = useState({ stats: {}, users: [], sales: [], products: [] });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -183,7 +185,7 @@ const AdminDashboard = ({ user, onLogout }) => {
   const handleSaveStock = async (productId, newStockValue) => {
     const numStock = parseInt(newStockValue, 10);
     if (isNaN(numStock) || numStock < 0) {
-      alert('El stock disponible debe ser un número entero mayor o igual a 0.');
+      if (showToast) showToast('El stock disponible debe ser un número entero mayor o igual a 0.', 'error');
       setEditingStock(null);
       return;
     }
@@ -205,12 +207,12 @@ const AdminDashboard = ({ user, onLogout }) => {
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        alert(data.message || 'Error al actualizar el stock disponible.');
+        if (showToast) showToast(data.message || 'Error al actualizar el stock disponible.', 'error');
         fetchDashboardData();
       }
     } catch (err) {
       console.error('Error actualizando stock:', err);
-      alert('Error de conexión al actualizar el stock disponible.');
+      if (showToast) showToast('Error de conexión al actualizar el stock disponible.', 'error');
       fetchDashboardData();
     } finally {
       setUpdatingStock(null);
@@ -239,12 +241,12 @@ const AdminDashboard = ({ user, onLogout }) => {
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        alert(data.message || 'Error al cambiar el estado de la venta.');
+        if (showToast) showToast(data.message || 'Error al cambiar el estado de la venta.', 'error');
         fetchDashboardData();
       }
     } catch (err) {
       console.error('Error al actualizar estado de la venta:', err);
-      alert('Error de conexión al actualizar el estado de la venta.');
+      if (showToast) showToast('Error de conexión al actualizar el estado de la venta.', 'error');
       fetchDashboardData();
     } finally {
       setUpdatingSaleStatus(null);
@@ -410,7 +412,7 @@ const AdminDashboard = ({ user, onLogout }) => {
           products: prev.products.map(p => String(p.id) === String(productId) ? { ...p, destacado: currentStatus } : p)
         }));
         const data = await res.json();
-        alert(data.message || 'Error al cambiar estado destacado.');
+        if (showToast) showToast(data.message || 'Error al cambiar estado destacado.', 'error');
       }
     } catch (err) {
       console.error(err);
@@ -419,7 +421,7 @@ const AdminDashboard = ({ user, onLogout }) => {
         ...prev,
         products: prev.products.map(p => String(p.id) === String(productId) ? { ...p, destacado: currentStatus } : p)
       }));
-      alert('Error de conexión al actualizar estado destacado.');
+      if (showToast) showToast('Error de conexión al actualizar estado destacado.', 'error');
     } finally {
       setTogglingFeatured(null);
     }
@@ -514,15 +516,16 @@ const AdminDashboard = ({ user, onLogout }) => {
           stats: { ...prev.stats, activeUsers: Math.max(0, (prev.stats?.activeUsers || 0) - 1) }
         }));
         setUserToDelete(null);
+        if (showToast) showToast('Usuario eliminado correctamente', 'success');
       } else {
-        alert(data.message || `Error al eliminar usuario (${res.status})`);
+        if (showToast) showToast(data.message || `Error al eliminar usuario (${res.status})`, 'error');
         if (res.status === 401) {
           setIsQrVerified(false);
         }
       }
     } catch (err) {
       console.error('Error al eliminar usuario:', err);
-      alert('Error de conexión al intentar eliminar usuario.');
+      if (showToast) showToast('Error de conexión al intentar eliminar usuario.', 'error');
     } finally {
       setActionLoading(null);
     }
@@ -544,13 +547,14 @@ const AdminDashboard = ({ user, onLogout }) => {
             return String(uid) === String(userId) ? { ...u, rol: newRole } : u;
           })
         }));
+        if (showToast) showToast(`Rol actualizado a "${newRole}"`, 'success');
       } else {
         const data = await res.json();
-        alert(data.message || 'Error al cambiar el rol.');
+        if (showToast) showToast(data.message || 'Error al cambiar el rol.', 'error');
       }
     } catch (err) {
       console.error('Error al cambiar rol:', err);
-      alert('Error de conexión al cambiar el rol.');
+      if (showToast) showToast('Error de conexión al cambiar el rol.', 'error');
     } finally {
       setActionLoading(null);
     }
@@ -569,11 +573,12 @@ const AdminDashboard = ({ user, onLogout }) => {
           ...prev,
           products: prev.products.filter(p => p.id !== id)
         }));
+        if (showToast) showToast('Producto eliminado exitosamente', 'success');
       } else if (res.status === 401) {
         setIsQrVerified(false);
       }
     } catch (err) {
-      alert('Error al eliminar producto');
+      if (showToast) showToast('Error al eliminar producto', 'error');
     } finally {
       setActionLoading(null);
     }
@@ -583,7 +588,7 @@ const AdminDashboard = ({ user, onLogout }) => {
   const handleCreateProduct = async (e) => {
     e.preventDefault();
     if (!newProduct.nombre || !newProduct.precio || !newProduct.categoria) {
-      alert('Por favor completa los campos requeridos.');
+      if (showToast) showToast('Por favor completa los campos requeridos.', 'error');
       return;
     }
 
@@ -618,17 +623,17 @@ const AdminDashboard = ({ user, onLogout }) => {
           startPolling(data.product.id);
         } else {
           setGeneratingStatus('idle');
-          alert('Producto guardado correctamente (sin modelo 3D).');
+          if (showToast) showToast('Producto guardado correctamente.', 'success');
           setNewProduct({ nombre: '', descripcion: '', precio: '', categoria: 'Clásico', prompt3d: '' });
           fetchDashboardData();
         }
       } else {
-        alert(data.message || 'Error al crear producto.');
+        if (showToast) showToast(data.message || 'Error al crear producto.', 'error');
         setGeneratingStatus('idle');
       }
     } catch (err) {
       console.error(err);
-      alert('Error de conexión.');
+      if (showToast) showToast('Error de conexión.', 'error');
       setGeneratingStatus('idle');
     }
   };
@@ -733,7 +738,7 @@ const AdminDashboard = ({ user, onLogout }) => {
           }
         }, 3000);
       } else {
-        alert(data.message || 'Error al iniciar regeneración.');
+        if (showToast) showToast(data.message || 'Error al iniciar regeneración.', 'error');
         setRegenStatus('error');
       }
     } catch (err) {
@@ -812,12 +817,13 @@ const AdminDashboard = ({ user, onLogout }) => {
       window.dispatchEvent(new CustomEvent('products-updated'));
 
       setSaveSuccess(true);
+      if (showToast) showToast('¡Producto actualizado con éxito!', 'success');
       setTimeout(() => {
         setSaveSuccess(false);
         setEditingProduct(null);
       }, 800);
     } catch (err) {
-      alert(err.message || 'Error al guardar cambios');
+      if (showToast) showToast(err.message || 'Error al guardar cambios', 'error');
     } finally {
       setActionLoading(null);
     }
@@ -860,16 +866,16 @@ const AdminDashboard = ({ user, onLogout }) => {
   );
 
   return (
-    <div className="min-h-screen bg-[#050505] text-white pt-28 pb-20 px-6 font-sans selection:bg-gold-premium/30">
+    <div className="min-h-screen bg-[#050505] text-white pt-24 sm:pt-28 pb-20 px-4 sm:px-6 font-sans selection:bg-gold-premium/30">
       <div className="max-w-7xl mx-auto">
         
-        <header className="mb-12 flex flex-col md:flex-row md:items-end justify-between gap-6 border-b border-white/5 pb-10">
+        <header className="mb-8 sm:mb-12 flex flex-col md:flex-row md:items-end justify-between gap-6 border-b border-white/5 pb-8 sm:pb-10">
           <div>
             <div className="flex items-center gap-3 text-gold-premium mb-2">
               <Shield size={20} className="animate-pulse" />
               <span className="text-xs tracking-[0.3em] uppercase font-bold">Protocolo de Administración Habilitado</span>
             </div>
-            <h1 className="text-5xl font-extralight tracking-tight text-white mb-2">
+            <h1 className="text-3xl sm:text-5xl font-extralight tracking-tight text-white mb-2">
               Super <span className="text-gold-premium font-normal">Gelatto</span> Dashboard
             </h1>
             <p className="text-white/40 flex items-center gap-2 text-sm">
@@ -890,25 +896,25 @@ const AdminDashboard = ({ user, onLogout }) => {
         </header>
 
         {/* STATS CARDS */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 mb-8 sm:mb-12">
           {[
             { label: 'Ingresos Totales', value: formatCurrency(dashboardData.stats.totalRevenue), icon: ShoppingBag, color: 'text-gold-premium' },
             { label: 'Ventas Realizadas', value: dashboardData.stats.totalSales, icon: ShoppingBag, color: 'text-white' },
             { label: 'Clientes Registrados', value: dashboardData.stats.activeUsers, icon: Users, color: 'text-white' },
           ].map((stat, i) => (
-            <div key={i} className="group relative bg-[#0a0a0a] border border-white/5 rounded-3xl p-8 hover:border-gold-premium/30 transition-all duration-500 overflow-hidden shadow-lg">
+            <div key={i} className="group relative bg-[#0a0a0a] border border-white/5 rounded-3xl p-6 sm:p-8 hover:border-gold-premium/30 transition-all duration-500 overflow-hidden shadow-lg">
               <div className="absolute top-0 right-0 p-8 text-white/5 group-hover:text-gold-premium/10 transition-colors duration-500">
                 <stat.icon size={80} />
               </div>
               <h3 className="text-white/30 text-xs tracking-widest uppercase mb-4 font-bold">{stat.label}</h3>
-              <p className={`text-4xl font-light ${stat.color} relative z-10 tracking-tighter`}>{stat.value}</p>
+              <p className={`text-3xl sm:text-4xl font-light ${stat.color} relative z-10 tracking-tighter`}>{stat.value}</p>
               <div className="mt-4 h-1 w-12 bg-gold-premium/20 group-hover:w-full transition-all duration-700"></div>
             </div>
           ))}
         </div>
 
         {/* NAVIGATION TABS */}
-        <div className="flex flex-wrap gap-2 mb-8 bg-white/5 p-1.5 rounded-2xl w-fit border border-white/5 backdrop-blur-md">
+        <div className="flex gap-2 mb-8 bg-white/5 p-1.5 rounded-2xl w-full sm:w-fit border border-white/5 backdrop-blur-md overflow-x-auto hide-scrollbar max-w-full">
           {[
             { id: 'users', label: 'Usuarios', icon: Users },
             { id: 'sales', label: 'Ventas', icon: ShoppingBag },
@@ -920,7 +926,7 @@ const AdminDashboard = ({ user, onLogout }) => {
             <button 
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className={`flex items-center gap-2.5 px-6 py-3 rounded-xl text-sm font-medium transition-all cursor-pointer ${
+              className={`flex items-center gap-2.5 px-4 sm:px-6 py-3 rounded-xl text-xs sm:text-sm font-medium transition-all cursor-pointer whitespace-nowrap min-h-[44px] ${
                 activeTab === tab.id 
                 ? 'bg-gold-premium text-black shadow-[0_0_20px_rgba(212,175,55,0.3)] font-semibold' 
                 : 'text-white/60 hover:text-white hover:bg-white/5'
@@ -1032,8 +1038,8 @@ const AdminDashboard = ({ user, onLogout }) => {
               </div>
 
               {/* TABLA DE USUARIOS */}
-              <div className="border border-white/5 rounded-2xl overflow-hidden">
-                <table className="w-full text-left border-collapse">
+              <div className="border border-white/5 rounded-2xl overflow-x-auto hide-scrollbar">
+                <table className="w-full text-left border-collapse min-w-[700px]">
                 <thead>
                   <tr className="border-b border-white/5 text-white/40 text-[10px] uppercase tracking-[0.2em] font-bold">
                     <th className="p-6">Identificador</th>
@@ -1134,8 +1140,8 @@ const AdminDashboard = ({ user, onLogout }) => {
 
           {/* TAB: SALES */}
           {activeTab === 'sales' && (
-            <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-              <table className="w-full text-left border-collapse">
+            <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 overflow-x-auto hide-scrollbar w-full">
+              <table className="w-full text-left border-collapse min-w-[700px]">
                 <thead>
                   <tr className="border-b border-white/5 text-white/40 text-[10px] uppercase tracking-[0.2em] font-bold">
                     <th className="p-6">Orden / Pedido</th>

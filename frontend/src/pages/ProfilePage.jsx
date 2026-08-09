@@ -162,13 +162,13 @@ const ProfilePage = ({ user, onUpdateUser }) => {
   };
 
   return (
-    <div className="pt-[80px] pb-24 px-6 min-h-screen">
+    <div className="pt-[80px] pb-24 px-4 sm:px-6 min-h-screen">
       <div className="max-w-7xl mx-auto">
-        <div className="grid lg:grid-cols-12 gap-8">
+        <div className="grid lg:grid-cols-12 gap-6 sm:gap-8">
           
           {/* Sidebar Info */}
           <div className="lg:col-span-4 space-y-6">
-            <div className="glass-card p-8 flex flex-col items-center">
+            <div className="glass-card p-6 sm:p-8 flex flex-col items-center">
               <input 
                 type="file" 
                 ref={fileInputRef} 
@@ -182,8 +182,8 @@ const ProfilePage = ({ user, onUpdateUser }) => {
                 onClick={() => fileInputRef.current?.click()}
                 title="Haz clic para cambiar tu foto de perfil"
               >
-                <div className="w-32 h-32 rounded-full bg-gradient-to-br from-pastel-pink to-gold-premium p-1 transition-transform group-hover:scale-105 shadow-2xl overflow-hidden">
-                  <div className="w-full h-full rounded-full bg-background-dark flex items-center justify-center text-5xl font-bold overflow-hidden relative">
+                <div className="w-28 h-28 sm:w-32 sm:h-32 rounded-full bg-gradient-to-br from-pastel-pink to-gold-premium p-1 transition-transform group-hover:scale-105 shadow-2xl overflow-hidden">
+                  <div className="w-full h-full rounded-full bg-background-dark flex items-center justify-center text-4xl sm:text-5xl font-bold overflow-hidden relative">
                     {picture ? (
                       <img src={picture} alt="Foto de perfil" className="w-full h-full object-cover rounded-full" />
                     ) : (
@@ -191,7 +191,7 @@ const ProfilePage = ({ user, onUpdateUser }) => {
                     )}
                   </div>
                 </div>
-                <div className="absolute bottom-1 right-1 p-2.5 rounded-full bg-gold-premium text-background-dark shadow-xl group-hover:scale-110 transition-all border-2 border-background-dark flex items-center justify-center">
+                <div className="absolute bottom-1 right-1 p-2 sm:p-2.5 rounded-full bg-gold-premium text-background-dark shadow-xl group-hover:scale-110 transition-all border-2 border-background-dark flex items-center justify-center min-h-[36px] min-w-[36px]">
                   <Camera size={16} />
                 </div>
                 <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/60 rounded-full opacity-0 group-hover:opacity-100 transition-opacity p-2 text-center">
@@ -202,15 +202,15 @@ const ProfilePage = ({ user, onUpdateUser }) => {
 
               {!isEditing ? (
                 <div className="text-center w-full">
-                  <h2 className="text-3xl font-playfair font-bold mb-1">{user?.name || 'Usuario'}</h2>
-                  <p className="text-white/40 text-sm mb-6 flex items-center justify-center gap-2">
-                    <Mail size={14} /> {user?.email}
+                  <h2 className="text-2xl sm:text-3xl font-playfair font-bold mb-1">{user?.name || 'Usuario'}</h2>
+                  <p className="text-white/40 text-xs sm:text-sm mb-6 flex items-center justify-center gap-2 break-all">
+                    <Mail size={14} className="flex-shrink-0" /> {user?.email}
                   </p>
                   
                   {user?.id ? (
                     <button 
                       onClick={() => setIsEditing(true)}
-                      className="w-full flex items-center justify-center gap-2 py-3 bg-white/5 hover:bg-gold-premium hover:text-background-dark border border-white/10 rounded-xl text-xs font-bold uppercase tracking-widest transition-all"
+                      className="w-full flex items-center justify-center gap-2 py-3 bg-white/5 hover:bg-gold-premium hover:text-background-dark border border-white/10 rounded-xl text-xs font-bold uppercase tracking-widest transition-all min-h-[44px]"
                     >
                       <Edit2 size={14} /> Editar Perfil
                     </button>
@@ -255,18 +255,18 @@ const ProfilePage = ({ user, onUpdateUser }) => {
                     {errors.email && <span className="field-error-msg">{errors.email}</span>}
                   </div>
 
-                  <div className="flex gap-3 pt-2">
+                  <div className="flex gap-2 pt-2">
                     <button 
                       type="button"
-                      onClick={() => { setIsEditing(false); setEditName(user?.name); setEditEmail(user?.email); setStatus({type:null, message:''}); }}
-                      className="flex-1 flex items-center justify-center gap-2 py-3 bg-white/5 hover:bg-red-500/20 border border-white/10 rounded-xl text-xs font-bold uppercase tracking-widest transition-all"
+                      onClick={() => { setIsEditing(false); setEditName(user?.name || ''); setEditEmail(user?.email || ''); setStatus({type:null, message:''}); setErrors({}); }}
+                      className="flex-1 py-3 bg-white/5 border border-white/10 rounded-xl text-xs font-bold uppercase tracking-widest min-h-[44px]"
                     >
-                      <X size={14} /> Cancelar
+                      Cancelar
                     </button>
                     <button 
                       type="submit"
                       disabled={updating || !isFormValid}
-                      className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-xs font-bold uppercase tracking-widest transition-all ${!isFormValid ? 'button-disabled' : 'bg-gold-premium text-background-dark hover:scale-[1.02]'}`}
+                      className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-xs font-bold uppercase tracking-widest transition-all min-h-[44px] ${!isFormValid ? 'button-disabled' : 'bg-gold-premium text-background-dark hover:scale-[1.02]'}`}
                     >
                       {updating ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />} 
                       {updating ? 'Guardando' : 'Guardar'}
@@ -292,17 +292,16 @@ const ProfilePage = ({ user, onUpdateUser }) => {
               )}
             </div>
 
-            <div className="glass-card p-6 space-y-4">
-              <h3 className="text-[10px] font-bold uppercase tracking-widest text-white/30">Configuración</h3>
-              <button className="w-full flex justify-between items-center text-sm p-3 rounded-xl hover:bg-white/5 transition-colors group">
+            <div className="glass-card p-4 sm:p-6 space-y-2">
+              <button className="w-full flex justify-between items-center text-sm p-3 rounded-xl hover:bg-white/5 transition-colors group min-h-[44px]">
                 <div className="flex items-center gap-3 text-white/70 group-hover:text-gold-premium"><Package size={18} /> Mis Pedidos</div>
                 <ChevronRight size={16} className="text-white/20" />
               </button>
-              <button className="w-full flex justify-between items-center text-sm p-3 rounded-xl hover:bg-white/5 transition-colors group">
+              <button className="w-full flex justify-between items-center text-sm p-3 rounded-xl hover:bg-white/5 transition-colors group min-h-[44px]">
                 <div className="flex items-center gap-3 text-white/70 group-hover:text-gold-premium"><CreditCard size={18} /> Métodos de Pago</div>
                 <ChevronRight size={16} className="text-white/20" />
               </button>
-              <button className="w-full flex justify-between items-center text-sm p-3 rounded-xl hover:bg-white/5 transition-colors group">
+              <button className="w-full flex justify-between items-center text-sm p-3 rounded-xl hover:bg-white/5 transition-colors group min-h-[44px]">
                 <div className="flex items-center gap-3 text-white/70 group-hover:text-gold-premium"><Star size={18} /> SuperPoints</div>
                 <ChevronRight size={16} className="text-white/20" />
               </button>
@@ -310,41 +309,41 @@ const ProfilePage = ({ user, onUpdateUser }) => {
           </div>
 
           {/* Main Content */}
-          <div className="lg:col-span-8 space-y-8">
+          <div className="lg:col-span-8 space-y-6 sm:space-y-8">
             
             {/* SuperPoints Progress - VIP Card Style */}
             <motion.div 
               initial={{ opacity: 0, scale: 0.98 }}
               animate={{ opacity: 1, scale: 1 }}
               transition={{ duration: 0.5 }}
-              className="relative overflow-hidden rounded-[32px] p-10 bg-gradient-to-br from-[#1a1c29] via-[#11121a] to-[#0a0b10] border border-white/5 shadow-2xl"
+              className="relative overflow-hidden rounded-[24px] sm:rounded-[32px] p-6 sm:p-10 bg-gradient-to-br from-[#1a1c29] via-[#11121a] to-[#0a0b10] border border-white/5 shadow-2xl"
             >
               <div className="absolute top-0 right-0 w-[400px] h-[400px] bg-gold-premium/5 blur-[120px] rounded-full pointer-events-none" />
               <div className="absolute bottom-0 left-0 w-[300px] h-[300px] bg-pastel-pink/5 blur-[100px] rounded-full pointer-events-none" />
               
-              <div className="relative z-10 flex flex-col md:flex-row justify-between items-start md:items-center gap-6 mb-10">
+              <div className="relative z-10 flex flex-col md:flex-row justify-between items-start md:items-center gap-6 mb-8 sm:mb-10">
                 <div>
                   <div className="inline-flex items-center gap-2 px-3 py-1 bg-gold-premium/10 rounded-full border border-gold-premium/20 mb-4">
                     <Crown size={14} className="text-gold-premium" />
                     <span className="text-[10px] uppercase tracking-widest font-bold text-gold-premium">Membresía Elite</span>
                   </div>
-                  <h3 className="text-4xl font-playfair font-bold text-white flex items-center gap-3 mb-2">
+                  <h3 className="text-3xl sm:text-4xl font-playfair font-bold text-white flex items-center gap-3 mb-2">
                     SuperPoints <Sparkles className="text-pastel-pink animate-pulse" size={24} />
                   </h3>
                   <p className="text-white/40 text-sm">Nivel actual: <span className="text-white font-bold italic bg-white/5 px-3 py-1 rounded-lg ml-2 border border-white/5">Lover</span></p>
                 </div>
                 
-                <div className="bg-black/40 p-6 rounded-[24px] backdrop-blur-xl border border-white/10 shadow-xl">
+                <div className="bg-black/40 p-5 sm:p-6 rounded-[24px] backdrop-blur-xl border border-white/10 shadow-xl w-full md:w-auto">
                   <p className="text-[10px] text-white/30 uppercase tracking-widest font-bold mb-2">Balance Total</p>
                   <div className="flex items-baseline gap-2">
-                    <span className="text-5xl font-bold bg-gradient-to-r from-gold-premium via-white to-gold-premium text-transparent bg-clip-text drop-shadow-sm">{superPoints}</span>
+                    <span className="text-4xl sm:text-5xl font-bold bg-gradient-to-r from-gold-premium via-white to-gold-premium text-transparent bg-clip-text drop-shadow-sm">{superPoints}</span>
                     <span className="text-white/20 text-sm font-medium">/ 500 pts</span>
                   </div>
                 </div>
               </div>
 
               {/* Progress Bar Container */}
-              <div className="relative mb-10 z-10">
+              <div className="relative mb-8 sm:mb-10 z-10">
                 <div className="flex justify-between text-[10px] uppercase tracking-widest font-bold text-white/30 mb-3 ml-1 mr-1">
                   <span>Lover</span>
                   <span className="text-gold-premium/60">Fan</span>
@@ -359,29 +358,29 @@ const ProfilePage = ({ user, onUpdateUser }) => {
                      <div className="absolute top-0 right-0 bottom-0 w-32 bg-gradient-to-r from-transparent via-white/20 to-transparent animate-[shimmer_2s_infinite]" />
                   </motion.div>
                 </div>
-                <div className="flex justify-between items-center mt-4 text-[13px]">
-                  <p className="text-white/40">
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 mt-4 text-[13px]">
+                  <p className="text-white/40 text-xs sm:text-sm">
                     Siguiente nivel en <strong className="text-gold-premium">{nextTierPoints - superPoints} puntos</strong>
                   </p>
-                  <button className="text-white/40 hover:text-white transition-colors flex items-center gap-1.5 font-bold uppercase text-[10px] tracking-widest border-b border-transparent hover:border-white/20 pb-0.5">
+                  <button className="text-white/40 hover:text-white transition-colors flex items-center gap-1.5 font-bold uppercase text-[10px] tracking-widest border-b border-transparent hover:border-white/20 pb-0.5 min-h-[32px]">
                     Historial de puntos <ChevronRight size={12} />
                   </button>
                 </div>
               </div>
 
               {/* Actions */}
-              <div className="grid grid-cols-2 gap-4 mt-4 z-10 relative">
-                <button className="flex items-center justify-center gap-2 py-4 bg-white/5 hover:bg-white/10 transition-all rounded-[18px] border border-white/5 text-sm font-bold group">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4 z-10 relative">
+                <button className="flex items-center justify-center gap-2 py-3.5 sm:py-4 bg-white/5 hover:bg-white/10 transition-all rounded-[18px] border border-white/5 text-xs sm:text-sm font-bold group min-h-[48px]">
                   <Gift size={18} className="text-pastel-pink group-hover:scale-110 transition-transform" /> Canjear Premios
                 </button>
-                <button className="flex items-center justify-center gap-2 py-4 bg-gradient-to-r from-gold-premium to-yellow-500 text-background-dark hover:shadow-[0_0_25px_rgba(212,175,55,0.3)] transition-all rounded-[18px] text-sm font-bold">
+                <button className="flex items-center justify-center gap-2 py-3.5 sm:py-4 bg-gradient-to-r from-gold-premium to-yellow-500 text-background-dark hover:shadow-[0_0_25px_rgba(212,175,55,0.3)] transition-all rounded-[18px] text-xs sm:text-sm font-bold min-h-[48px]">
                   Ver Catálogo <ChevronRight size={18} />
                 </button>
               </div>
             </motion.div>
 
             {/* Order History */}
-            <div className="glass-card p-10 overflow-hidden">
+            <div className="glass-card p-5 sm:p-10 overflow-hidden">
               <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-10">
                 <div className="flex items-center gap-3">
                   <div className="w-10 h-10 rounded-xl bg-gold-premium/10 flex items-center justify-center text-gold-premium">

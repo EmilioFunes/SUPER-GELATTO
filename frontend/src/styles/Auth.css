@@ -557,7 +557,33 @@
   text-underline-offset: 4px;
 }
 
-@media (max-width: 768px) {
+@media (max-width: 960px) {
+  .login-page--split {
+    flex-direction: column;
+    min-height: 100vh;
+  }
+
+  .login-page__image-side {
+    display: none;
+  }
+
+  .login-page__panel {
+    flex: 1 1 100%;
+    width: 100%;
+    height: auto;
+    min-height: 100vh;
+    padding: 2.5rem 1.5rem;
+  }
+
+  .login-brand__logo-container {
+    margin-top: 0;
+  }
+
+  .login-brand__logo {
+    height: 180px;
+    max-width: 90%;
+  }
+
   .login-page {
     justify-content: center;
   }
@@ -575,5 +601,15 @@
 
   .login-page__overlay {
     background: rgba(0, 0, 0, 0.5);
+  }
+}
+
+@media (max-width: 480px) {
+  .login-page__panel {
+    padding: 1.75rem 1rem;
+  }
+
+  .login-brand__logo {
+    height: 140px;
   }
 }

@@ -30,20 +30,33 @@
   justify-content: space-between;
 }
 
-/* ─── Logo ──────────────────────────────────────────────── */
 .navbar-logo-pop {
-  height: 85px;
+  height: 52px;
   width: auto;
-  object-contain: contain;
+  object-fit: contain;
   filter: drop-shadow(0 4px 12px rgba(0,0,0,0.3));
   transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
   position: relative;
   z-index: 60;
-  margin-top: 15px; /* Adjust to overlap down or keep it balanced */
+  margin-top: 0;
+}
+
+@media (min-width: 640px) {
+  .navbar-logo-pop {
+    height: 68px;
+    margin-top: 5px;
+  }
+}
+
+@media (min-width: 1024px) {
+  .navbar-logo-pop {
+    height: 85px;
+    margin-top: 10px;
+  }
 }
 
 .group:hover .navbar-logo-pop {
-  transform: scale(1.1) translateY(5px);
+  transform: scale(1.08) translateY(2px);
   filter: drop-shadow(0 8px 20px rgba(0,0,0,0.4));
 }
 

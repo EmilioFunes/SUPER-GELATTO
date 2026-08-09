@@ -16,7 +16,7 @@ const CartDrawer = ({ isOpen, onClose }) => {
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: -10 }}
           transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-          className="absolute top-[100%] right-0 mt-4 w-[360px] max-h-[80vh] bg-background-dark/95 backdrop-blur-xl border border-white/10 rounded-2xl z-[90] shadow-2xl flex flex-col overflow-hidden"
+          className="fixed sm:absolute top-[80px] sm:top-[100%] right-4 sm:right-0 w-[calc(100vw-2rem)] sm:w-[380px] max-w-[400px] max-h-[80vh] bg-background-dark/95 backdrop-blur-xl border border-white/10 rounded-2xl z-[90] shadow-2xl flex flex-col overflow-hidden"
         >
           {/* Header */}
           <div className="p-5 border-b border-white/10 flex justify-between items-center bg-white/[0.02]">

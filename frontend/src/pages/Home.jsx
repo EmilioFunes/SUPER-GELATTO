@@ -9,7 +9,6 @@ import { useCart } from '../context/CartContext';
 import FlavorModal from '../components/FlavorModal';
 import FrameAnimation from '../components/FrameAnimation';
 import GelatoBuilder3D from '../components/GelatoBuilder3D';
-import { FLAVORS } from '../data/flavors';
 
 const storyParagraphs = [
   {
@@ -49,7 +48,7 @@ const storyParagraphs = [
 const Home = ({ user }) => {
   const [selectedFlavor, setSelectedFlavor] = useState(null);
   const [storyOpen, setStoryOpen] = useState(false);
-  const { addToCart } = useCart();
+  const { addToCart, showToast } = useCart();
   const navigate = useNavigate();
 
   const [allProducts, setAllProducts] = useState([]);
@@ -89,13 +88,13 @@ const Home = ({ user }) => {
   const handleQuickAdd = (flavor, e) => {
     e.stopPropagation(); // Evitar que se abra el modal al presionar el botón de añadir
     if (!user?.id) {
-      alert('¡Vaya! Necesitas una cuenta registrada para realizar pedidos. Te llevamos al registro 🍦');
+      if (showToast) showToast('Necesitas una cuenta registrada para realizar pedidos. Te llevamos al registro 🍦', 'info');
       navigate('/register');
       return;
     }
     // Asegurarnos de pasar los campos correctos (nombre, precio, imagen)
     addToCart({ ...flavor, precio: flavor.price }, 1);
-    alert(`¡${flavor.name} añadido al carrito! 🍦`);
+    if (showToast) showToast(`¡${flavor.name} añadido al carrito! 🍦`, 'success');
   };
 
   const tiers = [
@@ -287,7 +286,7 @@ const Home = ({ user }) => {
       </AnimatePresence>
 
       {/* ─── Hero Section ──────────────────────────────── */}
-      <section className="relative min-h-[90vh] flex items-center overflow-hidden px-6">
+      <section className="relative min-h-[85vh] sm:min-h-[90vh] flex items-center overflow-hidden px-4 sm:px-6 py-12 md:py-0">
         <div className="absolute inset-0 w-full h-full -z-20">
           <video
             autoPlay loop muted playsInline
@@ -297,30 +296,30 @@ const Home = ({ user }) => {
           <div className="absolute inset-0 bg-gradient-to-b from-transparent via-background-dark/50 to-background-dark" />
         </div>
         <div className="absolute top-0 left-0 w-full h-full -z-10 opacity-30">
-          <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-pastel-pink/20 blur-[120px] rounded-full animate-pulse" />
-          <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-gold-premium/10 blur-[120px] rounded-full" />
+          <div className="absolute top-1/4 left-1/4 w-72 sm:w-96 h-72 sm:h-96 bg-pastel-pink/20 blur-[120px] rounded-full animate-pulse" />
+          <div className="absolute bottom-1/4 right-1/4 w-72 sm:w-96 h-72 sm:h-96 bg-gold-premium/10 blur-[120px] rounded-full" />
         </div>
 
-        <div className="max-w-7xl mx-auto grid md:grid-cols-2 gap-12 items-center">
-          <motion.div initial={{ opacity: 0, x: -50 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.8 }}>
-            <span className="inline-block px-4 py-1.5 bg-white/5 border border-white/10 rounded-full text-xs font-bold tracking-widest text-gold-premium uppercase mb-6">
+        <div className="max-w-7xl mx-auto grid md:grid-cols-2 gap-8 md:gap-12 items-center w-full">
+          <motion.div initial={{ opacity: 0, x: -50 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.8 }} className="text-center md:text-left">
+            <span className="inline-block px-4 py-1.5 bg-white/5 border border-white/10 rounded-full text-xs font-bold tracking-widest text-gold-premium uppercase mb-4 sm:mb-6">
               Experiencia Artesanal Premium
             </span>
-            <h1 className="text-6xl md:text-8xl font-playfair font-bold leading-tight mb-8">
-              Sabor que <br />
+            <h1 className="text-4xl sm:text-6xl md:text-8xl font-playfair font-bold leading-tight mb-6 sm:mb-8">
+              Sabor que <br className="hidden sm:inline" />
               <span className="italic text-transparent bg-clip-text bg-gradient-to-r from-pastel-pink via-gold-premium to-pastel-blue">
                 Enamora
               </span>
             </h1>
-            <p className="text-lg text-white/60 mb-10 max-w-lg leading-relaxed">
+            <p className="text-base sm:text-lg text-white/60 mb-8 sm:mb-10 max-w-lg leading-relaxed mx-auto md:mx-0">
               Descubre el verdadero arte del gelato. Fusionamos tradición italiana con ingredientes frescos de nuestra tierra para crear momentos de pura felicidad.
             </p>
-            <div className="flex flex-wrap gap-4">
+            <div className="flex flex-wrap justify-center md:justify-start gap-4">
               <motion.button
                 whileHover={{ scale: 1.04 }}
                 whileTap={{ scale: 0.97 }}
                 onClick={() => setStoryOpen(true)}
-                className="px-8 py-3 rounded-full border border-white/20 hover:bg-white/5 hover:border-gold-premium/40 hover:text-gold-premium transition-all duration-300"
+                className="px-6 sm:px-8 py-3 rounded-full border border-white/20 hover:bg-white/5 hover:border-gold-premium/40 hover:text-gold-premium transition-all duration-300 min-h-[44px]"
               >
                 Nuestra Historia
               </motion.button>
@@ -328,10 +327,10 @@ const Home = ({ user }) => {
           </motion.div>
 
           {/* Animation frames — right side */}
-          <div className="flex items-center justify-center md:justify-end relative z-10 md:translate-x-16">
+          <div className="flex items-center justify-center md:justify-end relative z-10 md:translate-x-12">
             <FrameAnimation
               fps={24}
-              className="relative z-10 w-[240px] h-[240px] md:w-[400px] md:h-[400px] rounded-full overflow-hidden shadow-2xl drop-shadow-[0_20px_40px_rgba(255,183,197,0.15)]"
+              className="relative z-10 w-[200px] h-[200px] sm:w-[280px] sm:h-[280px] md:w-[400px] md:h-[400px] rounded-full overflow-hidden shadow-2xl drop-shadow-[0_20px_40px_rgba(255,183,197,0.15)]"
             />
           </div>
 
@@ -489,7 +488,7 @@ const Home = ({ user }) => {
             whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true }}
             transition={{ duration: 0.6, delay: 0.1 }}
-            className="grid grid-cols-3 gap-4 mb-16 max-w-2xl mx-auto"
+            className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4 mb-12 sm:mb-16 max-w-2xl mx-auto"
           >
             {[
               { val: '12K+', label: 'Miembros activos' },

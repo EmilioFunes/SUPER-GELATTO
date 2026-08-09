@@ -196,94 +196,36 @@ const GelatoScene = ({ container, selectedScoops, selectedToppings, availableSco
           const toppingData = toppingsData.find(t => t.id === toppingId);
           if (!toppingData) return null;
           const transform = TOPPING_TRANSFORMS[index] || { pos: [0, 0, 0], rot: [0, 0, 0] };
-          const y = toppingBaseY + transform.pos[1];
           return (
             <Suspense key={`topping-${index}-${toppingId}`} fallback={null}>
-              <PartModel
-                url={`${BASE_PATH}/${toppingData.file}`}
-                scale={toppingData.scale}
-                position={[transform.pos[0], y, transform.pos[2]]}
-                rotation={transform.rot}
-              />
+              <PartModel url={`${BASE_PATH}/${toppingData.file}`} scale={2.0} position={[transform.pos[0], toppingBaseY + transform.pos[1], transform.pos[2]]} rotation={transform.rot} />
             </Suspense>
           );
         })}
       </RotatingGroup>
-
-      <ContactShadows
-        position={[0, -2.5, 0]}
-        opacity={0.4}
-        scale={8}
-        blur={2.5}
-      />
-      <Environment preset="studio" />
-      <OrbitControls
-        enablePan={false}
-        enableZoom={true}
-        minDistance={3}
-        maxDistance={12}
-        minPolarAngle={Math.PI / 6}
-        maxPolarAngle={Math.PI / 2}
-        autoRotate={false}
-      />
+      <ContactShadows position={[0, -2.5, 0]} opacity={0.4} scale={8} blur={2.5} />
+      <OrbitControls enablePan={false} enableZoom={true} minDistance={3} maxDistance={12} minPolarAngle={Math.PI / 6} maxPolarAngle={Math.PI / 2} />
     </>
   );
 };
 
-// Memoize the entire 3D segment to prevent re-mounts on global state changes (like Cart)
-const MemoizedCanvas = React.memo(({ container, selectedScoops, selectedToppings, availableScoops, canvasRef }) => {
-  return (
-    <Canvas
-      ref={canvasRef}
-      dpr={[1, 1.5]}
-      camera={{ position: [0, 3, 8], fov: 40 }}
-      style={{ width: '100%', height: '100%', minHeight: '500px' }}
-      gl={{ antialias: true, alpha: true, preserveDrawingBuffer: true }}
-      onCreated={({ gl }) => {
-        gl.domElement.addEventListener('webglcontextlost', (e) => {
-          e.preventDefault();
-        });
-      }}
-    >
-      <GelatoScene 
-        container={container} 
-        selectedScoops={selectedScoops} 
-        selectedToppings={selectedToppings} 
-        availableScoops={availableScoops}
-      />
-    </Canvas>
-  );
-});
+const MemoizedCanvas = React.memo(({ container, selectedScoops, selectedToppings, availableScoops, canvasRef }) => (
+  <Canvas ref={canvasRef} dpr={[1, 1.5]} camera={{ position: [0, 3, 8], fov: 40 }} gl={{ antialias: true, alpha: true, preserveDrawingBuffer: true }}>
+    <GelatoScene container={container} selectedScoops={selectedScoops} selectedToppings={selectedToppings} availableScoops={availableScoops} />
+  </Canvas>
+));
 
-/* ─── Selector Button (single-select for container) ───── */
 const SelectorButton = ({ item, isSelected, onClick, showColor, count }) => (
   <motion.button
     whileHover={{ scale: 1.08 }}
     whileTap={{ scale: 0.95 }}
     onClick={onClick}
-    className={`
-      relative flex flex-col items-center gap-1.5 px-3 py-3 rounded-2xl border transition-all duration-300
-      ${isSelected
-        ? 'bg-white/10 border-amber-400/60 shadow-lg shadow-amber-400/10'
-        : 'bg-white/[0.03] border-white/8 hover:bg-white/[0.06] hover:border-white/15'}
-    `}
+    className={`relative flex flex-col items-center gap-1.5 px-3 py-3 rounded-2xl border transition-all duration-300 ${isSelected ? 'bg-white/10 border-amber-400/60' : 'bg-white/[0.03] border-white/8'}`}
   >
-    {/* Count badge for multi-select */}
-    {count > 0 && (
-      <div className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-amber-400 text-background-dark text-[10px] font-black flex items-center justify-center z-10">
-        {count}
-      </div>
-    )}
-    {showColor && item.color && (
-      <div
-        className="w-5 h-5 rounded-full border border-white/20 shadow-inner"
-        style={{ backgroundColor: item.color }}
-      />
-    )}
+    {count > 0 && <div className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-amber-400 text-background-dark text-[10px] font-black flex items-center justify-center z-10">{count}</div>}
+    {showColor && item.color && <div className="w-5 h-5 rounded-full border border-white/20" style={{ backgroundColor: item.color }} />}
     <span className="text-xl">{item.emoji}</span>
-    <span className={`text-[10px] font-bold uppercase tracking-wider ${isSelected || count > 0 ? 'text-amber-300' : 'text-white/50'}`}>
-      {item.name}
-    </span>
+    <span className="text-[11px] font-medium text-white/80 tracking-wide">{item.name}</span>
   </motion.button>
 );
 
@@ -305,8 +247,8 @@ const SelectionChip = ({ emoji, name, onRemove }) => (
 
 /* ─── Main Component ──────────────────────────────────── */
 const GelatoBuilder3D = ({ user }) => {
+  const { addToCart, showToast } = useCart();
   const navigate = useNavigate();
-  const { addToCart } = useCart();
   const canvasRef = useRef();
   const [container, setContainer] = useState('cone');
   const [selectedScoops, setSelectedScoops] = useState(['vanilla']);
@@ -323,7 +265,7 @@ const GelatoBuilder3D = ({ user }) => {
   const handleAddToCart = () => {
     // SECURITY CHECK: Solo registrados en DB pueden comprar
     if (!user?.id) {
-      alert('¡Vaya! Necesitas una cuenta registrada para realizar pedidos. Te llevamos al registro 🍦');
+      if (showToast) showToast('¡Vaya! Necesitas una cuenta registrada para realizar pedidos. Te llevamos al registro 🍦', 'info');
       navigate('/register');
       return;
     }
@@ -359,7 +301,7 @@ const GelatoBuilder3D = ({ user }) => {
     addToCart(customProduct, 1);
     
     // Optional: show some feedback or close modal/reset
-    alert('¡Tu creación ha sido añadida al carrito! 🍦');
+    if (showToast) showToast('¡Tu creación ha sido añadida al carrito! 🍦', 'success');
   };
 
   const tabs = [
@@ -447,7 +389,7 @@ const GelatoBuilder3D = ({ user }) => {
           className="grid lg:grid-cols-[1fr_380px] gap-8"
         >
           {/* 3D Viewer */}
-          <div className="relative rounded-[32px] border border-white/8 bg-white/[0.02] backdrop-blur-sm overflow-hidden min-h-[500px] group">
+          <div className="relative rounded-[32px] border border-white/8 bg-white/[0.02] backdrop-blur-sm overflow-hidden h-[340px] sm:h-[460px] lg:h-[550px] group">
             {/* Corner decorations */}
             <div className="absolute top-4 left-4 z-10 flex items-center gap-2">
               <div className="w-2 h-2 rounded-full bg-amber-400/60 animate-pulse" />

@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 
 const CartContext = createContext();
 
@@ -17,6 +18,14 @@ export const CartProvider = ({ children, user }) => {
   const userId = user?.id; // Usar el ID de la base de datos
   const [cart, setCart] = useState([]);
   const [isLoaded, setIsLoaded] = useState(false);
+  const [toast, setToast] = useState(null);
+
+  const showToast = (message, type = 'success') => {
+    setToast({ message, type });
+    setTimeout(() => {
+      setToast(null);
+    }, 3500);
+  };
 
   // Efecto para CARGAR el carrito correcto cuando cambia el usuario (login/logout)
   useEffect(() => {
@@ -69,9 +78,32 @@ export const CartProvider = ({ children, user }) => {
       updateQuantity, 
       clearCart, 
       totalItems, 
-      totalPrice 
+      totalPrice,
+      showToast
     }}>
       {children}
+
+      {/* Floating Toast Notification */}
+      <AnimatePresence>
+        {toast && (
+          <motion.div
+            initial={{ opacity: 0, y: -20, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -20, scale: 0.95 }}
+            className={`fixed top-24 right-4 sm:right-8 z-[200] max-w-sm px-5 py-3.5 rounded-2xl backdrop-blur-xl border shadow-2xl flex items-center gap-3 text-xs sm:text-sm font-bold ${
+              toast.type === 'error' 
+                ? 'bg-red-950/90 border-red-500/40 text-red-200 shadow-red-950/50' 
+                : toast.type === 'info'
+                ? 'bg-blue-950/90 border-blue-500/40 text-blue-200 shadow-blue-950/50'
+                : 'bg-[#0d0a1a]/95 border-gold-premium/40 text-gold-premium shadow-gold-premium/20'
+            }`}
+          >
+            <span className="text-lg">{toast.type === 'error' ? '⚠️' : toast.type === 'info' ? 'ℹ️' : '🍦'}</span>
+            <span className="leading-tight flex-1 text-left">{toast.message}</span>
+            <button onClick={() => setToast(null)} className="text-white/40 hover:text-white p-1">✕</button>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </CartContext.Provider>
   );
 };
