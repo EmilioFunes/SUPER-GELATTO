@@ -859,7 +859,9 @@ app.post('/api/login', async (req, res) => {
     return res.status(400).json({ message: 'El correo debe ser un email válido (sin caracteres especiales) terminado en .com, .net o .edu.' });
   }
 
-  const { data: user, error } = await supabase.from('usuario').select('*').eq('email', email).single();
+  const cleanEmail = String(email || '').trim().toLowerCase();
+
+  const { data: user, error } = await supabase.from('usuario').select('*').eq('email', cleanEmail).single();
 
   if (error || !user) return res.status(401).json({ message: 'Email o contraseña incorrectos.' });
 
