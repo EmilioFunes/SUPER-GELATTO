@@ -39,10 +39,10 @@ const PartModel = ({ url, position = [0, 0, 0], rotation = [0, 0, 0], scale = 1,
       if (node.isMesh) {
         node.castShadow = true;
         node.receiveShadow = true;
-        if (isScoop && node.material) {
-          node.material.roughness = 0.8;
+        if (node.material) {
+          node.material.roughness = isScoop ? 0.6 : 0.4;
           node.material.metalness = 0.1;
-          node.material.envMapIntensity = 0.5;
+          node.material.envMapIntensity = 1.2;
         }
       }
     });
@@ -145,15 +145,16 @@ const GelatoScene = ({ container, selectedScoops, selectedToppings, availableSco
   return (
     <>
       {/* Lighting Suite for Premium Photography Look */}
-      <ambientLight intensity={0.4} />
-      <spotLight position={[10, 10, 10]} angle={0.15} penumbra={1} intensity={1.5} castShadow />
-      <pointLight position={[-10, -10, -10]} intensity={0.5} color="#ffb7c5" />
+      <ambientLight intensity={1.1} />
+      <Environment preset="city" />
+      <spotLight position={[10, 15, 10]} angle={0.25} penumbra={1} intensity={2.2} castShadow />
+      <pointLight position={[-10, 5, -10]} intensity={1.0} color="#ffd1dc" />
       
       {/* Main backlight (Rim Light) for depth */}
-      <directionalLight position={[0, 5, -5]} intensity={0.8} color="#ffffff" />
+      <directionalLight position={[0, 8, -5]} intensity={1.2} color="#ffffff" />
       
       {/* Front fill light */}
-      <directionalLight position={[0, 2, 5]} intensity={0.4} color="#ffd4a8" />
+      <directionalLight position={[0, 4, 8]} intensity={1.2} color="#fff2db" />
 
       {/* Camera auto-adjusts to fit all items */}
       <CameraAdjuster scoopCount={selectedScoops.length} toppingCount={selectedToppings.length} />
@@ -389,18 +390,21 @@ const GelatoBuilder3D = ({ user }) => {
           className="grid lg:grid-cols-[1fr_380px] gap-8"
         >
           {/* 3D Viewer */}
-          <div className="relative rounded-[32px] border border-white/8 bg-white/[0.02] backdrop-blur-sm overflow-hidden h-[340px] sm:h-[460px] lg:h-[550px] group">
+          <div className="relative rounded-[32px] border border-white/15 bg-gradient-to-br from-[#2d1b40] via-[#1f1030] to-[#12081f] overflow-hidden h-[340px] sm:h-[460px] lg:h-[550px] group shadow-[0_20px_60px_rgba(0,0,0,0.5)]">
+            {/* Radial Studio Light behind 3D model */}
+            <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-amber-500/15 via-purple-600/10 to-transparent pointer-events-none" />
+
             {/* Corner decorations */}
             <div className="absolute top-4 left-4 z-10 flex items-center gap-2">
-              <div className="w-2 h-2 rounded-full bg-amber-400/60 animate-pulse" />
-              <span className="text-[10px] text-white/30 font-bold uppercase tracking-widest">Vista 3D</span>
+              <div className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+              <span className="text-[10px] text-white/70 font-bold uppercase tracking-widest">Vista 3D</span>
             </div>
             <div className="absolute top-4 right-4 z-10">
-              <span className="text-[10px] text-white/30 font-bold uppercase tracking-widest">Arrastra para rotar</span>
+              <span className="text-[10px] text-white/70 font-bold uppercase tracking-widest">Arrastra para rotar</span>
             </div>
 
             {/* Gradient border glow */}
-            <div className="absolute inset-0 rounded-[32px] bg-gradient-to-br from-amber-400/5 via-transparent to-pink-500/5 pointer-events-none" />
+            <div className="absolute inset-0 rounded-[32px] bg-gradient-to-br from-amber-400/10 via-transparent to-pink-500/10 pointer-events-none" />
 
             <MemoizedCanvas 
               container={container} 
@@ -411,19 +415,19 @@ const GelatoBuilder3D = ({ user }) => {
             />
 
             {/* Bottom info bar */}
-            <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-background-dark/80 to-transparent">
+            <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-background-dark/90 via-background-dark/50 to-transparent z-10">
               <div className="flex items-center justify-center gap-4 flex-wrap">
                 <div className="flex items-center gap-1.5">
                   <span className="text-sm">{containers.find(c => c.id === container)?.emoji}</span>
-                  <span className="text-[11px] text-white/60 font-bold">{containers.find(c => c.id === container)?.name}</span>
+                  <span className="text-[11px] text-white/90 font-bold">{containers.find(c => c.id === container)?.name}</span>
                 </div>
-                <div className="w-px h-4 bg-white/10" />
+                <div className="w-px h-4 bg-white/20" />
                 <div className="flex items-center gap-1.5">
-                  <span className="text-[11px] text-white/40 font-bold">{selectedScoops.length} sabor{selectedScoops.length !== 1 ? 'es' : ''}</span>
+                  <span className="text-[11px] text-white/80 font-bold">{selectedScoops.length} sabor{selectedScoops.length !== 1 ? 'es' : ''}</span>
                 </div>
-                <div className="w-px h-4 bg-white/10" />
+                <div className="w-px h-4 bg-white/20" />
                 <div className="flex items-center gap-1.5">
-                  <span className="text-[11px] text-white/40 font-bold">{selectedToppings.length} topping{selectedToppings.length !== 1 ? 's' : ''}</span>
+                  <span className="text-[11px] text-white/80 font-bold">{selectedToppings.length} topping{selectedToppings.length !== 1 ? 's' : ''}</span>
                 </div>
               </div>
             </div>
