@@ -1063,10 +1063,19 @@ app.post('/api/google-login', async (req, res) => {
   const { data: user, error } = await supabase.from('usuario').select('*').eq('email', email).single();
 
   if (user) {
+    // Generar token JWT firmado
+    const token = jwt.sign(
+      { id_usuario: user.id_usuario, email: user.email, rol: user.rol },
+      JWT_SECRET,
+      { expiresIn: '24h' }
+    );
+
     // Si existe, lo logueamos directamente (Google ya validó su identidad)
     return res.status(200).json({
+      ok: true,
       message: 'Inicio de sesión con Google exitoso.',
-      user: { id: user.id_usuario, name: user.nombre, email: user.email, rol: user.rol }
+      token,
+      user: { id: user.id_usuario, id_usuario: user.id_usuario, name: user.nombre, email: user.email, rol: user.rol }
     });
   }
 
@@ -1083,9 +1092,18 @@ app.post('/api/google-login', async (req, res) => {
 
     if (registerError) throw registerError;
 
+    // Generar token JWT firmado
+    const token = jwt.sign(
+      { id_usuario: newUser.id_usuario, email: newUser.email, rol: newUser.rol },
+      JWT_SECRET,
+      { expiresIn: '24h' }
+    );
+
     return res.status(200).json({
+      ok: true,
       message: 'Registro e inicio de sesión con Google exitoso.',
-      user: { id: newUser.id_usuario, name: newUser.nombre, email: newUser.email, rol: newUser.rol }
+      token,
+      user: { id: newUser.id_usuario, id_usuario: newUser.id_usuario, name: newUser.nombre, email: newUser.email, rol: newUser.rol }
     });
   } catch (err) {
     console.error('Error en Google Login:', err);

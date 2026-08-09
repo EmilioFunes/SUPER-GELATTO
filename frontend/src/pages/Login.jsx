@@ -83,7 +83,15 @@ function Login({ onLogin }) {
       const data = await loginRes.json();
 
       if (loginRes.ok) {
-        if (data.token) setToken(data.token);
+        if (data.token) {
+          setToken(data.token);
+          sessionStorage.setItem('superGelatto_token', data.token);
+          localStorage.setItem('superGelatto_token', data.token);
+        }
+        if (data.user) {
+          localStorage.setItem('superGelatto_user', JSON.stringify(data.user));
+          sessionStorage.setItem('superGelatto_user', JSON.stringify(data.user));
+        }
         onLogin({ ...data.user, picture });
         navigate(data.user?.rol === 'admin' ? '/admin' : '/');
       } else {
