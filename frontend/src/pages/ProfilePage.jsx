@@ -78,7 +78,7 @@ const ProfilePage = ({ user, onUpdateUser }) => {
           setOrders(data);
         }
       } catch (error) {
-        console.error("Error fetching orders:", error);
+        console.error("Error fetching orders in real time:", error);
       } finally {
         setLoading(false);
       }
@@ -86,9 +86,18 @@ const ProfilePage = ({ user, onUpdateUser }) => {
 
     fetchOrders();
 
-    // "Tiempo real" simple: Polling cada 10 segundos para no saturar
-    const interval = setInterval(fetchOrders, 10000);
-    return () => clearInterval(interval);
+    // Sincronización en tiempo real ultra-rápida (cada 2 segundos)
+    const interval = setInterval(fetchOrders, 2000);
+
+    const handleFocus = () => fetchOrders();
+    window.addEventListener('focus', handleFocus);
+    window.addEventListener('superGelatto_order_updated', fetchOrders);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('focus', handleFocus);
+      window.removeEventListener('superGelatto_order_updated', fetchOrders);
+    };
   }, [user]);
 
   const handleUpdateProfile = async (e) => {
@@ -329,16 +338,26 @@ const ProfilePage = ({ user, onUpdateUser }) => {
 
             {/* Order History */}
             <div className="glass-card p-10 overflow-hidden">
-              <div className="flex justify-between items-center mb-10">
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-10">
                 <div className="flex items-center gap-3">
                   <div className="w-10 h-10 rounded-xl bg-gold-premium/10 flex items-center justify-center text-gold-premium">
                     <Package size={20} />
                   </div>
-                  <h3 className="text-2xl font-bold font-playfair">Tus Pedidos</h3>
+                  <div>
+                    <h3 className="text-2xl font-bold font-playfair flex items-center gap-2">
+                      Tus Pedidos
+                      <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-green-500/10 border border-green-500/20 text-green-400 text-[10px] font-bold tracking-wider uppercase">
+                        <span className="w-2 h-2 rounded-full bg-green-500 animate-ping" />
+                        Tiempo Real
+                      </span>
+                    </h3>
+                  </div>
                 </div>
                 <div className="flex items-center gap-4">
                   {loading && <Loader2 className="animate-spin text-gold-premium/50" size={18} />}
-                  <button onClick={() => window.location.reload()} className="text-[10px] font-bold uppercase tracking-widest text-white/30 hover:text-white transition-colors">Refrescar</button>
+                  <span className="text-[10px] font-medium text-white/30 uppercase tracking-widest">
+                    Sincronización Automática (2s)
+                  </span>
                 </div>
               </div>
               

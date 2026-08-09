@@ -1179,20 +1179,48 @@ app.post('/api/reset-password/:token', async (req, res) => {
   }
 });
 
-// ─── Orders (using 'venta' table for sales) ────────────────
+// ─── Orders (using 'venta' table for sales with real-time fallback merge) ────────────────
 app.get('/api/orders/:userId', async (req, res) => {
   const { userId } = req.params;
-  const { data: orders, error } = await supabase
-    .from('venta')
-    .select('*')
-    .eq('id_usuario', userId)
-    .order('fecha', { ascending: false });
+  try {
+    let dbOrders = [];
+    const { data: supaOrders, error } = await supabase
+      .from('venta')
+      .select('*')
+      .eq('id_usuario', userId)
+      .order('fecha', { ascending: false });
 
-  if (error) {
-    console.error('SUPABASE ERROR (fetching orders):', error);
-    return res.status(500).json({ message: 'Error al obtener pedidos.', error: error.message });
+    if (supaOrders) {
+      dbOrders = supaOrders;
+    } else if (error) {
+      console.warn('Advertencia obteniendo pedidos de Supabase:', error.message);
+    }
+
+    // Mergear con FALLBACK_SALES en tiempo real para este usuario
+    const ordersMap = new Map();
+    dbOrders.forEach(o => ordersMap.set(String(o.id_venta), o));
+
+    FALLBACK_SALES.forEach(f => {
+      if (String(f.id_usuario) === String(userId)) {
+        if (!ordersMap.has(String(f.id_venta))) {
+          ordersMap.set(String(f.id_venta), f);
+        } else {
+          // Si el admin actualizó el estado en FALLBACK_SALES, usar el estado más reciente
+          const existing = ordersMap.get(String(f.id_venta));
+          existing.estado = f.estado || existing.estado;
+        }
+      }
+    });
+
+    const combinedOrders = Array.from(ordersMap.values()).sort(
+      (a, b) => new Date(b.fecha) - new Date(a.fecha)
+    );
+
+    return res.status(200).json(combinedOrders);
+  } catch (err) {
+    console.error('Error al obtener pedidos:', err);
+    return res.status(500).json({ message: 'Error al obtener pedidos.' });
   }
-  return res.status(200).json(orders);
 });
 
 app.post('/api/orders', async (req, res) => {

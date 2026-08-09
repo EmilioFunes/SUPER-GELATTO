@@ -2,7 +2,6 @@ import React, { Suspense, lazy } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { CartProvider } from './context/CartContext';
 import Navbar from './components/Navbar';
-import { setToken } from './utils/api';
 import './index.css';
 
 // Lazy loading de páginas y componentes pesados para carga inicial ultrarrápida
@@ -56,17 +55,13 @@ const AdminRoute = ({ children, user, onLogout }) => {
 
 function App() {
   const [user, setUser] = React.useState(() => {
-    const saved = localStorage.getItem('superGelatto_user') || sessionStorage.getItem('superGelatto_user');
+    const saved = sessionStorage.getItem('superGelatto_user');
     return saved ? JSON.parse(saved) : null;
   });
 
   const handleLogin = React.useCallback((userData) => {
     setUser(prev => {
       const updated = prev ? { ...prev, ...userData } : userData;
-      // Admins persisten en localStorage, clientes en sessionStorage
-      if (updated.rol === 'admin') {
-        localStorage.setItem('superGelatto_user', JSON.stringify(updated));
-      }
       sessionStorage.setItem('superGelatto_user', JSON.stringify(updated));
       return updated;
     });
@@ -97,7 +92,7 @@ function App() {
             {/* Auth Routes */}
             <Route
               path="/login"
-              element={user ? <Navigate to="/" /> : <Login onLogin={handleLogin} />}
+              element={<Login onLogin={handleLogin} />}
             />
             <Route
               path="/register"

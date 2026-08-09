@@ -74,6 +74,7 @@ const CheckoutPage = ({ user }) => {
       if (response.ok) {
         clearCart();
         setIsSuccess(true);
+        window.dispatchEvent(new Event('superGelatto_order_updated'));
       }
     } catch (error) {
       console.error('Error al crear pedido:', error);

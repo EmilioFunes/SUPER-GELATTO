@@ -199,6 +199,8 @@ function Login({ onLogin }) {
               type="button"
               onClick={() => {
                 setLoginRole('cliente');
+                setFormData({ email: '', password: '' });
+                setErrors({});
               }}
               className={`flex-grow flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs font-semibold tracking-wider uppercase transition-all duration-300 cursor-pointer ${
                 loginRole === 'cliente'
@@ -213,6 +215,8 @@ function Login({ onLogin }) {
               type="button"
               onClick={() => {
                 setLoginRole('admin');
+                setFormData({ email: '', password: '' });
+                setErrors({});
               }}
               className={`flex-grow flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs font-semibold tracking-wider uppercase transition-all duration-300 cursor-pointer ${
                 loginRole === 'admin'
@@ -241,13 +245,13 @@ function Login({ onLogin }) {
 
           {errors.server && <div className="login-error">{errors.server}</div>}
 
-          <form onSubmit={handleSubmit} className="login-form">
+          <form onSubmit={handleSubmit} className="login-form" autoComplete="off">
             <div className="login-form__field">
               <span className="login-form__field-icon material-symbols-outlined">mail</span>
               <input
-                type="text"
-                inputMode="email"
+                type="email"
                 name="email"
+                autoComplete="off"
                 placeholder="Correo electrónico"
                 className={`login-form__input ${errors.email ? 'input-field-error' : ''}`}
                 required
@@ -263,6 +267,7 @@ function Login({ onLogin }) {
               <input
                 type="password"
                 name="password"
+                autoComplete="new-password"
                 placeholder="Contraseña"
                 className={`login-form__input ${errors.password ? 'input-field-error' : ''}`}
                 required
