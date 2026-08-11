@@ -4,7 +4,7 @@ import { CartProvider } from './context/CartContext';
 import Navbar from './components/Navbar';
 import './index.css';
 
-// Lazy loading de páginas y componentes pesados para carga inicial ultrarrápida
+// Lazy loading de páginas y componentes pesados
 const Login = lazy(() => import('./pages/Login'));
 const Register = lazy(() => import('./pages/Register'));
 const ForgotPassword = lazy(() => import('./pages/ForgotPassword'));
@@ -16,7 +16,7 @@ const CheckoutPage = lazy(() => import('./pages/CheckoutPage'));
 const AdminDashboard = lazy(() => import('./pages/AdminDashboard'));
 const Gelbot = lazy(() => import('./components/Gelbot'));
 
-// Componente de Carga Ultraligero y Elegante
+// Loader
 const PageLoader = () => (
   <div className="min-h-screen bg-[#070709] flex flex-col items-center justify-center text-white p-4">
     <div className="w-10 h-10 border-3 border-amber-400/20 border-t-amber-400 rounded-full animate-spin mb-3"></div>
@@ -38,7 +38,7 @@ const ProtectedRoute = ({ children, user, onLogout }) => {
   );
 };
 
-// Admin Route Component (Verifica autenticación Y rol de Administrador de manera estricta)
+// Admin Route Component
 const AdminRoute = ({ children, user, onLogout }) => {
   if (!user) return <Navigate to="/login" replace />;
   if (String(user.rol).trim() !== 'admin') return <Navigate to="/" replace />;
@@ -55,13 +55,16 @@ const AdminRoute = ({ children, user, onLogout }) => {
 
 function App() {
   const [user, setUser] = React.useState(() => {
-    const saved = sessionStorage.getItem('superGelatto_user');
+    const saved = localStorage.getItem('superGelatto_user') || sessionStorage.getItem('superGelatto_user');
     return saved ? JSON.parse(saved) : null;
   });
 
   const handleLogin = React.useCallback((userData) => {
     setUser(prev => {
       const updated = prev ? { ...prev, ...userData } : userData;
+      if (updated.rol === 'admin') {
+        localStorage.setItem('superGelatto_user', JSON.stringify(updated));
+      }
       sessionStorage.setItem('superGelatto_user', JSON.stringify(updated));
       return updated;
     });
@@ -77,7 +80,6 @@ function App() {
     sessionStorage.removeItem('superGelatto_face_verified_at');
   }, []);
 
-  // Limpieza de sesiones antiguas/incompletas (sin ID de base de datos)
   React.useEffect(() => {
     if (user && !user.id && !user.id_usuario) {
       handleLogout();
@@ -92,7 +94,7 @@ function App() {
             {/* Auth Routes */}
             <Route
               path="/login"
-              element={<Login onLogin={handleLogin} />}
+              element={user ? <Navigate to="/" /> : <Login onLogin={handleLogin} />}
             />
             <Route
               path="/register"
