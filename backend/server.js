@@ -2088,6 +2088,229 @@ app.get('/api/products', async (req, res) => {
   }
 });
 
+// ─── Pasarela de Pago Simulada (Mock Wompi) ────────────────────
+// ⚠️ MOCK ACADÉMICO: Esta pasarela NO procesa pagos reales.
+// Es una simulación fiel del flujo de un checkout colombiano
+// (PSE, Nequi, Botón Bancolombia) para fines de laboratorio escolar.
+// Ver docs/PAYMENT_GATEWAY.md para instrucciones de migración a Wompi real.
+
+// Almacén en memoria para transacciones de pago simuladas
+var paymentTransactions = [];
+if (typeof mockDb !== 'undefined') {
+  mockDb.transaccion_pago = mockDb.transaccion_pago || [];
+}
+
+function getPaymentTransactions() {
+  if (typeof mockDb !== 'undefined' && mockDb.transaccion_pago) {
+    return mockDb.transaccion_pago;
+  }
+  return paymentTransactions || [];
+}
+
+function pushPaymentTransaction(txn) {
+  if (typeof mockDb !== 'undefined' && mockDb.transaccion_pago) {
+    mockDb.transaccion_pago.push(txn);
+  } else if (typeof paymentTransactions !== 'undefined') {
+    paymentTransactions.push(txn);
+  }
+}
+
+app.post('/api/payments/process', async (req, res) => {
+  const { method, bank, items, amount, reference, userId, deliveryDetails, forceDecline } = req.body;
+
+  // ── Validaciones ────────────────────────────────────────────
+  const validMethods = ['PSE', 'NEQUI', 'BANCOLOMBIA'];
+  if (!method || !validMethods.includes(method.toUpperCase())) {
+    return res.status(400).json({ 
+      ok: false, 
+      message: `Método de pago inválido. Opciones: ${validMethods.join(', ')}` 
+    });
+  }
+
+  if (method.toUpperCase() === 'PSE' && !bank) {
+    return res.status(400).json({ ok: false, message: 'Debe seleccionar un banco para PSE.' });
+  }
+
+  // ── Recalcular/Obtener monto en COP ──────────────────────────
+  let serverTotal = 0;
+  const resolvedItems = [];
+
+  if (Array.isArray(items) && items.length > 0) {
+    for (const cartItem of items) {
+      const productId = cartItem.id || cartItem.id_producto;
+      const quantity = parseInt(cartItem.quantity, 10) || 1;
+
+      let serverProduct = FALLBACK_PRODUCTS.find(p => p.id_producto === productId);
+
+      if (!serverProduct && productId) {
+        try {
+          const { data: dbProd } = await supabase
+            .from('producto')
+            .select('id_producto, nombre, precio')
+            .eq('id_producto', productId)
+            .single();
+          if (dbProd) serverProduct = dbProd;
+        } catch (e) { /* Supabase no disponible */ }
+      }
+
+      const unitPrice = serverProduct ? serverProduct.precio : (cartItem.price || cartItem.precio || 0);
+      const itemTotal = unitPrice * quantity;
+      serverTotal += itemTotal;
+      resolvedItems.push({
+        name: serverProduct ? serverProduct.nombre : (cartItem.name || cartItem.nombre || `Producto ${productId}`),
+        quantity,
+        price: unitPrice,
+        subtotal: itemTotal
+      });
+    }
+  }
+
+  if (serverTotal === 0 && amount && !isNaN(Number(amount))) {
+    serverTotal = Number(amount);
+  }
+
+  if (serverTotal <= 0) {
+    return res.status(400).json({ ok: false, message: 'El monto de la transacción debe ser mayor a 0 COP.' });
+  }
+
+  // ── Referencia única de pedido y transacción ─────────────────
+  const timestamp = Date.now();
+  const randomSuffix = crypto.randomBytes(3).toString('hex').toUpperCase();
+  const orderReference = reference || req.body.orderReference || `ORD-SG-${timestamp}-${randomSuffix}`;
+  const transactionId = `TXN-SG-${timestamp}-${randomSuffix}`;
+
+  // ── Determinar resultado (ponderado o forzado) ──────────────
+  // ~90% aprobado, ~10% declinado para pruebas
+  const isForceDeclined = 
+    forceDecline === true || 
+    (bank && bank.toLowerCase().includes('pruebas') && bank.toLowerCase().includes('rechazo'));
+
+  let status;
+  if (isForceDeclined) {
+    status = 'DECLINED';
+  } else {
+    status = Math.random() < 0.9 ? 'APPROVED' : 'DECLINED';
+  }
+
+  const authCode = status === 'APPROVED' 
+    ? `AUTH-${crypto.randomBytes(3).toString('hex').toUpperCase()}`
+    : null;
+
+  // ── Simular latencia realista de pasarela (1-2s) ─────────────
+  const latency = 1000 + Math.floor(Math.random() * 1000); // 1.0 - 2.0 segundos
+  await new Promise(resolve => setTimeout(resolve, latency));
+
+  // ── Construir objeto de transacción ─────────────────────────
+  const transaction = {
+    id: transactionId,
+    status,
+    method: method.toUpperCase(),
+    bank: bank || (method.toUpperCase() === 'NEQUI' ? 'Nequi' : 'Bancolombia'),
+    amount: serverTotal,
+    reference: orderReference,
+    timestamp: new Date().toISOString(),
+    authCode,
+    items: resolvedItems
+  };
+
+  // Guardar resultado de transacción en estado/memoria local
+  pushPaymentTransaction(transaction);
+
+  // ── Guardar en Base de Datos (Supabase) ─────────────────────
+  try {
+    const finalUserId = userId || 1; // Fallback para usuario demo
+    const { data: newOrder, error: orderErr } = await supabase
+      .from('venta')
+      .insert([{ 
+        id_usuario: finalUserId, 
+        total: serverTotal, 
+        fecha: new Date().toISOString(),
+        estado: status === 'APPROVED' ? 'Pagado' : 'Fallido'
+      }])
+      .select().single();
+
+    if (orderErr) {
+      console.warn('Advertencia al guardar orden en base de datos:', orderErr.message);
+    }
+  } catch (dbErr) {
+    console.warn('Error al interactuar con Supabase en pasarela de pago:', dbErr.message);
+  }
+
+  // ── Si APPROVED: enviar correo de confirmación ───────────────
+  if (status === 'APPROVED' && userId) {
+    try {
+      const { data: user } = await supabase
+        .from('usuario')
+        .select('nombre, email')
+        .eq('id_usuario', userId)
+        .single();
+
+      if (user && user.email) {
+        const deliveryTime = Math.floor(Math.random() * (45 - 30 + 1) + 30);
+        const itemsHtml = resolvedItems.length > 0
+          ? `<ul>${resolvedItems.map(item => `<li><strong>${item.name}</strong> x ${item.quantity} - $${item.price.toLocaleString('es-CO')}</li>`).join('')}</ul>`
+          : '<p>Detalles del pedido procesados exitosamente.</p>';
+
+        const emailTransporter = await getTransporter();
+        const fromEmail = process.env.SMTP_USER || 'no-reply@supergelatto.com';
+
+        await emailTransporter.sendMail({
+          from: `"super gelatto 🍦" <${fromEmail}>`,
+          to: user.email,
+          subject: '🍦 ¡Pago confirmado y pedido en camino!',
+          html: `
+            <div style="font-family: Arial, sans-serif; color: #333; max-width: 600px; margin: 0 auto; border: 1px solid #eee; padding: 20px; border-radius: 10px;">
+              <h2 style="color: #ac2a5d; text-align: center;">¡Hola ${user.nombre}!</h2>
+              <p style="font-size: 16px; text-align: center;">Tu pago ha sido <strong style="color: #22c55e;">aprobado exitosamente</strong>.</p>
+              
+              <div style="background-color: #f0fdf4; padding: 15px; border-radius: 8px; margin: 15px 0; border: 1px solid #bbf7d0;">
+                <h3 style="margin-top: 0; color: #16a34a;">✅ Datos de la transacción:</h3>
+                <p style="margin: 4px 0;"><strong>Referencia:</strong> ${orderReference}</p>
+                <p style="margin: 4px 0;"><strong>Método:</strong> ${method.toUpperCase()} ${bank ? '- ' + bank : ''}</p>
+                <p style="margin: 4px 0;"><strong>Código de autorización:</strong> ${authCode}</p>
+              </div>
+
+              <div style="background-color: #f9f9f9; padding: 15px; border-radius: 8px; margin: 20px 0;">
+                <h3 style="margin-top: 0; color: #705d00;">Resumen de tu pedido:</h3>
+                ${itemsHtml}
+                <p style="font-size: 18px; border-top: 1px solid #ddd; padding-top: 10px;"><strong>Total: $${serverTotal.toLocaleString('es-CO')}</strong></p>
+              </div>
+              
+              <div style="text-align: center; margin: 30px 0; padding: 20px; border: 2px dashed #ac2a5d; border-radius: 15px;">
+                <span style="font-size: 24px;">🚚</span>
+                <h3 style="margin: 10px 0;">Tiempo estimado de entrega:</h3>
+                <p style="font-size: 22px; font-weight: bold; color: #ac2a5d; margin: 0;">${deliveryTime} minutos</p>
+              </div>
+              
+              <p style="text-align: center; color: #888; font-size: 12px;">Si tienes alguna duda, contáctanos respondiendo a este correo.</p>
+              <p style="text-align: center; font-weight: bold; color: #ac2a5d;">¡Que lo disfrutes! 🍦✨</p>
+            </div>
+          `
+        });
+        console.log(`📧 Correo de confirmación de pago enviado a: ${user.email}`);
+      }
+    } catch (mailErr) {
+      console.error('Error enviando correo de confirmación de pago:', mailErr);
+    }
+  }
+
+  // ── Respuesta final ─────────────────────────────────────────
+  const declineReasons = [
+    'Fondos insuficientes en la cuenta.',
+    'Transacción rechazada por la entidad financiera.',
+    'Se excedió el límite diario de transacciones.',
+    'Error de comunicación con la entidad bancaria.'
+  ];
+
+  return res.status(200).json({
+    ok: status === 'APPROVED',
+    transaction,
+    message: status === 'APPROVED' 
+      ? '¡Pago aprobado exitosamente!' 
+      : declineReasons[Math.floor(Math.random() * declineReasons.length)]
+  });
+});
+
 // ─── Chatbot (MCP RBAC) ──────────────────────────────────────
 app.post('/api/chatbot', async (req, res) => {
   await handleChatbotRequest(req, res, supabase);

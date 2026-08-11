@@ -1,7 +1,14 @@
 const Groq = require("groq-sdk");
 require('dotenv').config();
 
-const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+let groq = null;
+if (process.env.GROQ_API_KEY) {
+  try {
+    groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+  } catch (e) {
+    console.warn('⚠️ No se pudo inicializar el cliente Groq:', e.message);
+  }
+}
 
 // ── Herramientas del LLM ─────────────────────────────────────
 const tools = [

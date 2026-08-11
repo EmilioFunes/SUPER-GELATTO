@@ -1,26 +1,26 @@
 # 🍦 Super Gelatto
 
-¡Bienvenido a **Super Gelatto**! Esta es una aplicación web moderna y completa para una heladería artesanal, que incluye una interfaz de usuario premium, un sistema de puntos de lealtad, autenticación y un constructor de helados interactivo en 3D.
+¡Bienvenido a **Super Gelatto**! Esta es una aplicación web moderna y completa para una heladería artesanal, que incluye una interfaz de usuario premium, un sistema de puntos de lealtad, autenticación, pasarela de pago simulada estilo Wompi y un constructor de helados interactivo en 3D.
 
 Integrantes:
-Cristian Munera
-Jaider Funes
-Breidis Tabares
-Miguel Villa
+- Cristian Munera
+- Jaider Funes
+- Breidis Tabares
+- Miguel Villa
 
 
 ## 🚀 Estructura del Proyecto
 
 El proyecto está dividido en dos partes principales:
 
-- **`/frontend`**: Aplicación de cliente desarrollada en React (Vite), con animaciones avanzadas y una experiencia de usuario fluida. [Ver detalles de activos y diseño](./frontend/README.md).
+- **`/frontend`**: Aplicación de cliente desarrollada en React (Vite), con animaciones avanzadas y una experiencia de usuario fluida.
 - **`/backend`**: Servidor Node.js con Express, integrado con Supabase para la base de datos y autenticación, y servicios de envío de correos mediante SMTP.
 
 ---
 
 ## 🛠️ Tecnologías Utilizadas
 
-- **Frontend**: React.js, Vite, Framer Motion, React Three Fiber (para el 3D).
+- **Frontend**: React.js, Vite, Framer Motion, React Three Fiber (para el 3D), Lucide Icons.
 - **Backend**: Node.js, Express.
 - **Base de Datos & Auth**: Supabase.
 - **Estilos**: CSS nativo y diseño moderno (Glassmorphism).
@@ -78,6 +78,7 @@ cd SUPER-GELATTO
 - 💎 **SuperPoints**: Sistema de fidelización donde los usuarios acumulan puntos por cada compra.
 - 🔐 **Autenticación Segura**: Integración con Google Auth y registros tradicionales mediante Supabase.
 - 🛒 **Carrito de Compras**: Gestión dinámica de productos y pedidos.
+- 💳 **Pasarela de Pago Simulada (Mock Wompi)**: Checkout colombiano realista con PSE, Nequi y Botón Bancolombia (para fines académicos). Ver [Documentación de la Pasarela](./docs/PAYMENT_GATEWAY.md).
 
 ---
 
