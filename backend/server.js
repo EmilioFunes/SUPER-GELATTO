@@ -510,6 +510,7 @@ app.use(cors({
       allowedOrigins.includes('*') ||
       allowedOrigins.indexOf(origin) !== -1 ||
       origin.endsWith('.vercel.app') ||
+      origin.endsWith('.netlify.app') ||
       origin.includes('localhost') ||
       origin.includes('127.0.0.1')
     ) {
