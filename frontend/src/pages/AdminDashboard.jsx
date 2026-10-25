@@ -1208,25 +1208,29 @@ const AdminDashboard = ({ user, onLogout }) => {
                               disabled={updatingSaleStatus === s.id_venta}
                               style={{
                                 backgroundColor: '#111',
-                                color: currentStatus === 'En proceso' ? '#f59e0b' :
+                                color: currentStatus === 'En proceso' || currentStatus === 'Pendiente' ? '#f59e0b' :
                                        currentStatus === 'En entrega' ? '#22d3ee' :
                                        currentStatus === 'Enviado' ? '#60a5fa' :
-                                       currentStatus === 'Cancelado' ? '#ef4444' : '#4ade80'
+                                       currentStatus === 'Cancelado' || currentStatus === 'Fallido' ? '#ef4444' : '#4ade80'
                               }}
                               className={`appearance-none border rounded-xl px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider focus:outline-none cursor-pointer transition-all pr-7 ${
                                 updatingSaleStatus === s.id_venta ? 'opacity-50' : ''
                               } ${
-                                currentStatus === 'En proceso' ? 'border-amber-500/40' :
+                                currentStatus === 'En proceso' || currentStatus === 'Pendiente' ? 'border-amber-500/40' :
                                 currentStatus === 'En entrega' ? 'border-cyan-500/40' :
                                 currentStatus === 'Enviado' ? 'border-blue-500/40' :
-                                currentStatus === 'Cancelado' ? 'border-red-500/40' :
+                                currentStatus === 'Cancelado' || currentStatus === 'Fallido' ? 'border-red-500/40' :
                                 'border-green-500/40'
                               }`}
                             >
+                              <option value="Pendiente" style={{ backgroundColor: '#111', color: '#f59e0b' }}>Pendiente</option>
+                              <option value="Pagado" style={{ backgroundColor: '#111', color: '#4ade80' }}>Pagado</option>
+                              <option value="Fallido" style={{ backgroundColor: '#111', color: '#ef4444' }}>Fallido</option>
                               <option value="En proceso" style={{ backgroundColor: '#111', color: '#f59e0b' }}>En proceso</option>
                               <option value="En entrega" style={{ backgroundColor: '#111', color: '#22d3ee' }}>En entrega</option>
                               <option value="Enviado" style={{ backgroundColor: '#111', color: '#60a5fa' }}>Enviado</option>
                               <option value="Entregado" style={{ backgroundColor: '#111', color: '#4ade80' }}>Entregado</option>
+                              <option value="Completado" style={{ backgroundColor: '#111', color: '#4ade80' }}>Completado</option>
                               <option value="Cancelado" style={{ backgroundColor: '#111', color: '#ef4444' }}>Cancelado</option>
                             </select>
                             <div className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-white/40">
