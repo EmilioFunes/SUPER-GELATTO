@@ -69,15 +69,13 @@ function Login({ onLogin }) {
           return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
       }).join(''));
 
-      const payload = JSON.parse(jsonPayload);
-      const email = payload.email;
-      const name = payload.name || payload.given_name || 'Usuario de Google';
-      const picture = payload.picture;
+      // Solo para mostrar la foto: la identidad la verifica el servidor con el credential.
+      const picture = JSON.parse(jsonPayload).picture;
 
       const loginRes = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/google-login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, name }),
+        body: JSON.stringify({ credential: credentialResponse.credential }),
       });
 
       const data = await loginRes.json();

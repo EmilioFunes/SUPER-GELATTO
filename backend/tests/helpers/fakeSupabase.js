@@ -126,7 +126,8 @@ export function crearFakeSupabase() {
         contadoresId[llamada.tabla] = (contadoresId[llamada.tabla] || 1000) + 1;
         return { ...fila, [colId]: contadoresId[llamada.tabla] };
       });
-      return { data: llamada.modo === 'single' ? filas[0] : filas, error: null };
+      // single/maybeSingle devuelven una fila (objeto), como supabase-js; si no, un arreglo.
+      return { data: llamada.modo === 'varias' ? filas : filas[0] ?? null, error: null };
     }
     return { data: llamada.modo === 'varias' ? [] : null, error: null };
   }

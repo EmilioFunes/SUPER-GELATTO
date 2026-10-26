@@ -182,15 +182,17 @@ const functions = {
       return { error: "Usuario no encontrado." };
     }
 
-    const SUPER_ADMIN_EMAIL = 'muneracristian63@gmail.com';
+    // Super admin desde la variable de entorno; si está vacía, nadie lo es.
+    const SUPER_ADMIN_EMAIL = String(process.env.SUPER_ADMIN_EMAIL || '').split(',')[0].trim().toLowerCase();
+    const esSuperAdmin = (correo) => !!SUPER_ADMIN_EMAIL && correo === SUPER_ADMIN_EMAIL;
     const targetEmail = (targetUser.email || '').toLowerCase().trim();
     const cleanRequesterEmail = (requesterEmail || '').toLowerCase().trim();
 
-    if (targetEmail === SUPER_ADMIN_EMAIL || targetUser.rol === 'super_admin') {
+    if (esSuperAdmin(targetEmail) || targetUser.rol === 'super_admin') {
       return { error: "Acceso denegado. La cuenta principal de super administrador está protegida y no se puede eliminar." };
     }
 
-    if (targetUser.rol === 'admin' && cleanRequesterEmail !== SUPER_ADMIN_EMAIL) {
+    if (targetUser.rol === 'admin' && !esSuperAdmin(cleanRequesterEmail)) {
       return { error: "Acceso denegado. Solo la cuenta principal de Super Administrador puede eliminar usuarios administradores." };
     }
 
@@ -640,4 +642,4 @@ USUARIO: ${userName} | role: "cliente"`;
   }
 }
 
-module.exports = { handleChatbotRequest };
+module.exports = { handleChatbotRequest, functions };

@@ -13,6 +13,7 @@ const crypto = require('crypto');
 const nodemailer = require('nodemailer');
 const bcrypt = require('bcryptjs'); // Usamos bcryptjs para mejor compatibilidad en Windows
 const jwt = require('jsonwebtoken');
+const { OAuth2Client } = require('google-auth-library');
 const { createClient } = require('@supabase/supabase-js');
 const { handleChatbotRequest } = require('./chatbot');
 
@@ -26,8 +27,6 @@ const {
 const supabaseUrl = process.env.SUPABASE_URL;
 // Priorizar SUPABASE_SERVICE_ROLE_KEY para realizar operaciones administrativas de backend sin restricciones de RLS
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY;
-
-const JWT_SECRET = process.env.JWT_SECRET || 'supergelatto_secret_jwt_key_2026_default';
 
 // ─── AWS Rekognition Config ─────────────────────────────────────
 const rekognitionRegion = process.env.AWS_REGION || 'us-east-2';
@@ -353,7 +352,7 @@ const FALLBACK_PRODUCTS = [
 const mockDb = {
   producto: FALLBACK_PRODUCTS,
   usuario: [
-    { id_usuario: 1, nombre: 'Admin', apellido: 'SuperGelatto', email: 'saldarriagac890@gmail.com', password_hash: '$2a$10$GamiM2h7IwlRhosL5hQD0.OSBb2rdwSXVmkfpQS1rNOTkC2.Cw3zK', rol: 'admin' },
+    { id_usuario: 1, nombre: 'Admin', apellido: 'SuperGelatto', email: 'admin.principal@supergelatto.com', password_hash: '$2a$10$GamiM2h7IwlRhosL5hQD0.OSBb2rdwSXVmkfpQS1rNOTkC2.Cw3zK', rol: 'admin' },
     { id_usuario: 2, nombre: 'Admin', apellido: 'Secundario', email: 'admin@supergelatto.com', password_hash: '$2a$10$GamiM2h7IwlRhosL5hQD0.OSBb2rdwSXVmkfpQS1rNOTkC2.Cw3zK', rol: 'admin' },
     { id_usuario: 3, nombre: 'Cliente', apellido: 'Prueba', email: 'cliente@supergelatto.com', password_hash: '$2a$10$.2ki7UXxL2rjAX8VqUIIEewGFKxfLiGpqLeXZLX6oN7elDoMDQJU6', rol: 'cliente' }
   ],
@@ -493,6 +492,29 @@ if (isSupabaseConfigured) {
 // Se lanza al cargar el módulo (así se puede probar); `node server.js` termina con este mensaje.
 if (!supabase && (process.env.NODE_ENV === 'production' || process.env.RENDER)) {
   throw new Error('Configuración incompleta: faltan SUPABASE_URL y/o SUPABASE_SERVICE_ROLE_KEY (o SUPABASE_KEY). En producción el servidor no arranca sin base de datos, para no aprobar pagos que no se guardan.');
+}
+
+// ─── Secreto de las sesiones (JWT) ──────────────────────────
+// Un único secreto: JWT_SECRET. En producción es obligatorio (32+ caracteres); fuera de producción,
+// si falta, se genera uno aleatorio al arrancar (las sesiones se pierden al reiniciar). Nunca uno fijo.
+const esProduccion = process.env.NODE_ENV === 'production' || !!process.env.RENDER;
+const JWT_LONGITUD_MINIMA = 32;
+const JWT_ALGORITMO = 'HS256';
+const JWT_SECRET = (() => {
+  const secreto = (process.env.JWT_SECRET || '').trim();
+  if (secreto.length >= JWT_LONGITUD_MINIMA) return secreto;
+  if (esProduccion) {
+    throw new Error(`Configuración incompleta: falta JWT_SECRET o mide menos de ${JWT_LONGITUD_MINIMA} caracteres. En producción el servidor no arranca sin un secreto de sesiones seguro.`);
+  }
+  console.warn('⚠️ JWT_SECRET ausente o corto: se usa un secreto aleatorio temporal (solo desarrollo).');
+  return crypto.randomBytes(48).toString('hex');
+})();
+
+// ─── Google Sign-In ─────────────────────────────────────────
+const GOOGLE_CLIENT_ID = (process.env.GOOGLE_CLIENT_ID || '').trim();
+const googleOAuthClient = GOOGLE_CLIENT_ID ? new OAuth2Client(GOOGLE_CLIENT_ID) : null;
+if (!GOOGLE_CLIENT_ID && esProduccion) {
+  console.warn('⚠️ Falta GOOGLE_CLIENT_ID: el inicio de sesión con Google responderá 503 hasta configurarlo.');
 }
 
 if (!supabase) {
@@ -743,39 +765,49 @@ function hasForbiddenChars(str) {
   return /[<>&"'\/]/.test(str);
 }
 
-const SUPER_ADMIN_EMAIL = 'muneracristian63@gmail.com';
-const ADMIN_EMAILS = [
-  'muneracristian63@gmail.com',
-  'saldarriagac890@gmail.com',
-  'cristianmunera427@gmail.com',
-  'miguelvilla00@gmail.com',
-  'emiliofunes28@gmail.com'
-];
+// Correos de administradores: vienen de variables de entorno (nunca escritos en el código).
+//  - ADMIN_EMAILS: lista separada por comas. Al iniciar sesión con Google (correo verificado por Google)
+//    estos correos entran como admin.
+//  - SUPER_ADMIN_EMAIL: la cuenta principal (protegida; la única que puede eliminar o bajar admins).
+function listaCorreos(valor) {
+  return String(valor || '').split(',').map((e) => e.trim().toLowerCase()).filter(Boolean);
+}
+const SUPER_ADMIN_EMAIL = listaCorreos(process.env.SUPER_ADMIN_EMAIL)[0] || '';
+const ADMIN_EMAILS = [...new Set([...listaCorreos(process.env.ADMIN_EMAILS), ...(SUPER_ADMIN_EMAIL ? [SUPER_ADMIN_EMAIL] : [])])];
 
-function verifyTokenSafely(token) {
-  const secrets = [
-    JWT_SECRET,
-    '2d6dd55ad0b69fa0ef25d9810d7bd76767806c2b463e81a5cb7509623657410c71257bf53cac6fb4326491ebff83eecc',
-    'supergelatto_secret_jwt_key_2026_default'
-  ].filter(Boolean);
-
-  for (const secret of secrets) {
-    try {
-      const decoded = jwt.verify(token, secret);
-      if (decoded) return decoded;
-    } catch (e) {}
-  }
-  return null;
+// Si SUPER_ADMIN_EMAIL no está configurado, nadie es super admin (un correo vacío nunca coincide).
+function esSuperAdminEmail(email) {
+  const limpio = String(email || '').trim().toLowerCase();
+  return !!SUPER_ADMIN_EMAIL && limpio === SUPER_ADMIN_EMAIL;
 }
 
-// Middleware seguro para validar que la petición incluye un JWT válido de Administrador
-function requireAuthenticatedAdmin(req, res, next) {
-  // Soporte para entorno de pruebas de integración y simulación
-  if ((process.env.NODE_ENV === 'test' || process.env.SIMULATION_MODE === 'true') && req.headers['x-user-role'] === 'admin') {
-    req.user = { id_usuario: parseInt(req.headers['x-user-id'], 10) || 1, rol: 'admin' };
-    return next();
-  }
+// Rol con el que se firma la sesión: el de la base, salvo correos de ADMIN_EMAILS VERIFICADOS (Google).
+function rolConCorreoVerificado(usuario, emailVerificado) {
+  return ADMIN_EMAILS.includes(String(emailVerificado || '').trim().toLowerCase()) ? 'admin' : usuario.rol;
+}
 
+// Único lugar donde se firman sesiones: solo HS256, vencen en 24 h.
+function firmarToken(usuario, rol = usuario.rol) {
+  return jwt.sign(
+    { id_usuario: usuario.id_usuario, email: usuario.email, rol },
+    JWT_SECRET,
+    { algorithm: JWT_ALGORITMO, expiresIn: '24h' }
+  );
+}
+
+// Verifica con el único secreto y solo HS256. Devuelve el contenido del token o null.
+function verifyTokenSafely(token) {
+  if (typeof token !== 'string' || !token) return null;
+  try {
+    return jwt.verify(token, JWT_SECRET, { algorithms: [JWT_ALGORITMO] });
+  } catch (e) {
+    return null;
+  }
+}
+
+// Middleware seguro para validar que la petición incluye un JWT válido de Administrador.
+// El permiso sale SOLO del rol firmado en el token (ni cabeceras como x-user-role ni el correo).
+function requireAuthenticatedAdmin(req, res, next) {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.startsWith('Bearer ') ? authHeader.split(' ')[1] : req.headers['x-user-token'];
 
@@ -788,8 +820,7 @@ function requireAuthenticatedAdmin(req, res, next) {
     return res.status(401).json({ message: 'Token de sesión inválido o expirado. Por favor inicia sesión nuevamente.' });
   }
 
-  const email = (decoded?.email || '').toLowerCase().trim();
-  const isAuthorizedAdmin = decoded?.rol === 'admin' || decoded?.rol === 'super_admin' || ADMIN_EMAILS.includes(email);
+  const isAuthorizedAdmin = decoded?.rol === 'admin' || decoded?.rol === 'super_admin';
 
   if (!isAuthorizedAdmin) {
     return res.status(403).json({ message: 'Acceso denegado. Se requieren permisos de administrador.' });
@@ -1077,12 +1108,9 @@ app.post('/api/login', async (req, res) => {
     }
   }
 
-  // GENERAR TOKEN JWT FIRMADO
-  const token = jwt.sign(
-    { id_usuario: user.id_usuario, email: user.email, rol: user.rol },
-    JWT_SECRET,
-    { expiresIn: '24h' }
-  );
+  // GENERAR TOKEN JWT FIRMADO (rol de la base: el registro con contraseña no verifica el correo,
+  // así que aquí ADMIN_EMAILS no da permisos)
+  const token = firmarToken(user);
 
   return res.status(200).json({
     ok: true,
@@ -1220,11 +1248,7 @@ app.post('/api/admin/faceid/rekognition-login', async (req, res) => {
       return res.status(401).json(genericError);
     }
 
-    const token = jwt.sign(
-      { id_usuario: user.id_usuario, email: user.email, rol: user.rol },
-      JWT_SECRET,
-      { expiresIn: '24h' }
-    );
+    const token = firmarToken(user);
 
     return res.status(200).json({
       ok: true,
@@ -1266,114 +1290,100 @@ app.post('/api/admin/faceid/rekognition-login', async (req, res) => {
 
 
 // ─── Google Login ───────────────────────────────────────────
-app.post('/api/google-login', async (req, res) => {
-  const { email, name } = req.body;
+// El navegador manda el `credential` (ID token firmado por Google). Se verifica aquí con la librería
+// oficial; correo y nombre salen SOLO del token verificado (se ignora cualquier email/name/rol del cuerpo).
+const GOOGLE_CREDENTIAL_MAX = 8192;
+const COLUMNAS_SESION = 'id_usuario, nombre, email, rol';
 
-  if (!email || typeof email !== 'string') {
-    return res.status(400).json({ message: 'Email es obligatorio.' });
+async function verificarCredencialGoogle(credential) {
+  try {
+    const ticket = await googleOAuthClient.verifyIdToken({ idToken: credential, audience: GOOGLE_CLIENT_ID });
+    const payload = ticket.getPayload() || {};
+    const email = typeof payload.email === 'string' ? payload.email.trim().toLowerCase() : '';
+    if (!email || payload.email_verified !== true) return null;
+    return { email, nombre: String(payload.name || payload.given_name || email.split('@')[0]).trim().slice(0, 100) };
+  } catch (e) {
+    return null;
+  }
+}
+
+// Busca el usuario por correo exacto (sin distinguir mayúsculas). Se escapan los comodines de ilike
+// (% y _) y se confirma la coincidencia exacta, para que un correo no "encaje" con la cuenta de otro.
+async function buscarUsuarioPorEmail(email) {
+  const patron = email.replace(/[\\%_]/g, (c) => '\\' + c);
+  const { data, error } = await supabase.from('usuario').select(COLUMNAS_SESION).ilike('email', patron).maybeSingle();
+  if (error) return { error };
+  const usuario = data && String(data.email || '').trim().toLowerCase() === email ? data : null;
+  return { usuario };
+}
+
+function respuestaSesionGoogle(res, usuario, emailVerificado, mensaje) {
+  const rol = rolConCorreoVerificado(usuario, emailVerificado);
+  return res.status(200).json({
+    ok: true,
+    message: mensaje,
+    token: firmarToken(usuario, rol),
+    user: { id: usuario.id_usuario, id_usuario: usuario.id_usuario, name: usuario.nombre, email: usuario.email, rol }
+  });
+}
+
+app.post('/api/google-login', async (req, res) => {
+  if (!googleOAuthClient) {
+    return res.status(503).json({ ok: false, message: 'El inicio de sesión con Google no está disponible en este momento.' });
   }
 
-  const cleanEmail = email.trim();
+  const { credential } = req.body || {};
+  if (typeof credential !== 'string' || !credential || credential.length > GOOGLE_CREDENTIAL_MAX) {
+    return res.status(401).json({ ok: false, message: 'No se pudo verificar tu cuenta de Google.' });
+  }
 
+  const google = await verificarCredencialGoogle(credential);
+  if (!google) {
+    return res.status(401).json({ ok: false, message: 'No se pudo verificar tu cuenta de Google.' });
+  }
+
+  const errorGoogle = 'Error al vincular cuenta de Google.';
   try {
-    // 1. Buscar si el usuario ya existe (búsqueda insensible a mayúsculas/minúsculas)
-    let user = null;
-    const { data: userIlike, error: searchErr } = await supabase
-      .from('usuario')
-      .select('*')
-      .ilike('email', cleanEmail)
-      .maybeSingle();
-
-    user = userIlike;
-
-    if (!user) {
-      const { data: userEq } = await supabase
-        .from('usuario')
-        .select('*')
-        .eq('email', cleanEmail)
-        .maybeSingle();
-      user = userEq;
+    // 1. ¿Ya existe?
+    const busqueda = await buscarUsuarioPorEmail(google.email);
+    if (falloSupabase(res, busqueda.error, errorGoogle)) return;
+    if (busqueda.usuario) {
+      return respuestaSesionGoogle(res, busqueda.usuario, google.email, 'Inicio de sesión con Google exitoso.');
     }
 
-    if (user) {
-      const userRole = ADMIN_EMAILS.includes(cleanEmail.toLowerCase()) ? 'admin' : user.rol;
-      // Generar token JWT firmado
-      const token = jwt.sign(
-        { id_usuario: user.id_usuario, email: user.email, rol: userRole },
-        JWT_SECRET,
-        { expiresIn: '24h' }
-      );
-
-      return res.status(200).json({
-        ok: true,
-        message: 'Inicio de sesión con Google exitoso.',
-        token,
-        user: { id: user.id_usuario, id_usuario: user.id_usuario, name: user.nombre, email: user.email, rol: userRole }
-      });
-    }
-
-    // 2. Si no existe, lo registramos automáticamente
+    // 2. Si no existe, se registra como cliente (con una contraseña aleatoria que nadie conoce).
     const randomPassword = "Gg1!" + crypto.randomBytes(12).toString('hex') + "@#";
     const hashedPassword = await bcrypt.hash(randomPassword, saltRounds);
-    const userName = name || cleanEmail.split('@')[0];
 
     const { data: newUser, error: registerError } = await supabase
       .from('usuario')
-      .insert([{ nombre: userName, apellido: '', email: cleanEmail.toLowerCase(), password_hash: hashedPassword, rol: 'cliente' }])
-      .select().maybeSingle();
+      .insert([{ nombre: google.nombre, apellido: '', email: google.email, password_hash: hashedPassword, rol: 'cliente' }])
+      .select(COLUMNAS_SESION).maybeSingle();
 
     if (registerError) {
-      // Si el error es por duplicado (ya registrado), buscar el usuario existente y loguear
-      if (registerError.code === '23505' || registerError.message?.includes('duplicate') || registerError.message?.includes('unique')) {
-        const { data: existingUser } = await supabase
-          .from('usuario')
-          .select('*')
-          .ilike('email', cleanEmail)
-          .maybeSingle();
-
-        if (existingUser) {
-          const token = jwt.sign(
-            { id_usuario: existingUser.id_usuario, email: existingUser.email, rol: existingUser.rol },
-            JWT_SECRET,
-            { expiresIn: '24h' }
-          );
-
-          return res.status(200).json({
-            ok: true,
-            message: 'Inicio de sesión con Google exitoso.',
-            token,
-            user: { id: existingUser.id_usuario, id_usuario: existingUser.id_usuario, name: existingUser.nombre, email: existingUser.email, rol: existingUser.rol }
-          });
-        }
-      }
-      throw registerError;
+      // Duplicado (se registró a la vez por otra petición): se busca de nuevo y se inicia sesión.
+      const duplicado = registerError.code === '23505' || registerError.message?.includes('duplicate') || registerError.message?.includes('unique');
+      if (!duplicado) return falloSupabase(res, registerError, errorGoogle);
+      const otra = await buscarUsuarioPorEmail(google.email);
+      if (falloSupabase(res, otra.error, errorGoogle)) return;
+      if (!otra.usuario) return res.status(500).json({ ok: false, message: errorGoogle });
+      return respuestaSesionGoogle(res, otra.usuario, google.email, 'Inicio de sesión con Google exitoso.');
     }
 
-    const createdUser = newUser || (await supabase.from('usuario').select('*').eq('email', cleanEmail.toLowerCase()).maybeSingle()).data;
-
+    let createdUser = newUser;
     if (!createdUser) {
-      throw new Error('No se pudo recuperar los datos del nuevo usuario registrado.');
+      const creada = await buscarUsuarioPorEmail(google.email);
+      if (falloSupabase(res, creada.error, errorGoogle)) return;
+      createdUser = creada.usuario;
+    }
+    if (!createdUser) {
+      return res.status(500).json({ ok: false, message: errorGoogle });
     }
 
-    // Generar token JWT firmado
-    const token = jwt.sign(
-      { id_usuario: createdUser.id_usuario, email: createdUser.email, rol: createdUser.rol },
-      JWT_SECRET,
-      { expiresIn: '24h' }
-    );
-
-    return res.status(200).json({
-      ok: true,
-      message: 'Registro e inicio de sesión con Google exitoso.',
-      token,
-      user: { id: createdUser.id_usuario, id_usuario: createdUser.id_usuario, name: createdUser.nombre, email: createdUser.email, rol: createdUser.rol }
-    });
+    return respuestaSesionGoogle(res, createdUser, google.email, 'Registro e inicio de sesión con Google exitoso.');
   } catch (err) {
     console.error('❌ Error en Google Login:', err);
-    return res.status(500).json({
-      ok: false,
-      message: err.message ? `Error al vincular cuenta de Google: ${err.message}` : 'Error al vincular cuenta de Google.'
-    });
+    return res.status(500).json({ ok: false, message: errorGoogle });
   }
 });
 
@@ -1690,7 +1700,9 @@ app.get('/api/admin/dashboard', requireAdmin, async (req, res) => {
         activeUsers,
         totalSales: sales.length
       },
-      users,
+      // El panel decide qué botones mostrar con estas marcas (el correo del super admin no viaja al navegador).
+      soySuperAdmin: esSuperAdminEmail(req.user?.email),
+      users: users.map((u) => ({ ...u, es_super_admin: esSuperAdminEmail(u.email) || u.rol === 'super_admin' })),
       sales,
       products
     });
@@ -1719,7 +1731,7 @@ app.delete('/api/admin/users/:id', requireAdmin, async (req, res) => {
     }
 
     const targetEmail = (targetUser.email || '').toLowerCase().trim();
-    const isTargetSuperAdmin = targetEmail === SUPER_ADMIN_EMAIL || targetUser.rol === 'super_admin';
+    const isTargetSuperAdmin = esSuperAdminEmail(targetEmail) || targetUser.rol === 'super_admin';
 
     // No se permite eliminar la cuenta principal de super administrador
     if (isTargetSuperAdmin) {
@@ -1730,7 +1742,7 @@ app.delete('/api/admin/users/:id', requireAdmin, async (req, res) => {
     // - Super Admin: Puede eliminar tanto cuentas de administrador como de clientes.
     // - Admin normal: Solo puede eliminar cuentas de clientes, NO otros administradores.
     const isTargetAdmin = targetUser.rol === 'admin';
-    const isRequesterSuperAdmin = requesterEmail === SUPER_ADMIN_EMAIL;
+    const isRequesterSuperAdmin = esSuperAdminEmail(requesterEmail);
 
     if (isTargetAdmin && !isRequesterSuperAdmin) {
       return res.status(403).json({ 
@@ -1777,15 +1789,15 @@ app.put('/api/admin/users/:id/role', requireAdmin, async (req, res) => {
     }
 
     // No se puede modificar el rol de la cuenta principal de super administrador
-    if ((targetUser.email || '').toLowerCase() === SUPER_ADMIN_EMAIL) {
+    if (esSuperAdminEmail(targetUser.email)) {
       return res.status(403).json({ message: 'Acceso denegado. No se puede modificar el rol de la cuenta principal de super administrador.' });
     }
 
     // Si el usuario objetivo es administrador y se intenta bajar a cliente:
-    // Solo el super administrador (muneracristian63@gmail.com) puede realizar el cambio.
-    if (targetUser.rol === 'admin' && rol === 'cliente' && requesterEmail !== SUPER_ADMIN_EMAIL) {
+    // Solo el super administrador (SUPER_ADMIN_EMAIL) puede realizar el cambio.
+    if (targetUser.rol === 'admin' && rol === 'cliente' && !esSuperAdminEmail(requesterEmail)) {
       return res.status(403).json({ 
-        message: 'Acceso denegado. Solo la cuenta de super administrador principal (muneracristian63@gmail.com) puede bajar de categoría a los administradores a cliente.' 
+        message: 'Acceso denegado. Solo la cuenta de super administrador principal puede bajar de categoría a los administradores a cliente.' 
       });
     }
 
