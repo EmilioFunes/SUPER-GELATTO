@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Link, Navigate } from 'react-router-dom';
+import { getToken } from '../utils/api';
 import { User, Mail, Star, Package, CreditCard, ChevronRight, Edit2, Sparkles, Gift, Crown, Info, Loader2, Save, X, CheckCircle2, AlertCircle, Camera } from 'lucide-react';
 
 const ProfilePage = ({ user, onUpdateUser }) => {
@@ -98,7 +99,10 @@ const ProfilePage = ({ user, onUpdateUser }) => {
 
     const fetchOrders = async () => {
       try {
-        const response = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/orders/${user.id}`);
+        // Los pedidos solo se ven con sesión (el servidor exige el token y que sean del propio usuario).
+        const response = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/orders/${user.id}`, {
+          headers: { Authorization: `Bearer ${getToken()}` },
+        });
         if (response.ok) {
           const data = await response.json();
           setOrders(data);
@@ -126,6 +130,16 @@ const ProfilePage = ({ user, onUpdateUser }) => {
     };
   }, [user]);
 
+  // Mensaje en español según la respuesta del servidor al guardar el perfil.
+  const mensajeErrorPerfil = (estado, mensaje) => {
+    if (estado === 401) return 'Tu sesión expiró. Vuelve a iniciar sesión para guardar los cambios.';
+    if (estado === 403) return mensaje || 'No tienes permiso para modificar esta cuenta.';
+    if (estado === 409) return mensaje || 'Ese correo ya está en uso por otra cuenta.';
+    if (estado === 413) return 'La información enviada es demasiado grande.';
+    if (estado === 429) return mensaje || 'Demasiados intentos. Espera un momento e inténtalo de nuevo.';
+    return mensaje || 'Error al actualizar.';
+  };
+
   const handleUpdateProfile = async (e) => {
     e.preventDefault();
     if (!user?.id) return;
@@ -136,11 +150,12 @@ const ProfilePage = ({ user, onUpdateUser }) => {
     try {
       const response = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/users/${user.id}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: editName, email: editEmail, picture }),
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
+        // La foto no se manda: el servidor no la guarda y una foto grande superaría el tamaño permitido.
+        body: JSON.stringify({ name: editName, email: editEmail }),
       });
 
-      const data = await response.json();
+      const data = await response.json().catch(() => ({}));
 
       if (response.ok) {
         setStatus({ type: 'success', message: '¡Perfil actualizado con éxito!' });
@@ -152,7 +167,7 @@ const ProfilePage = ({ user, onUpdateUser }) => {
           setStatus({ type: null, message: '' });
         }, 2000);
       } else {
-        setStatus({ type: 'error', message: data.message || 'Error al actualizar.' });
+        setStatus({ type: 'error', message: mensajeErrorPerfil(response.status, data.message) });
       }
     } catch (error) {
       setStatus({ type: 'error', message: 'Error de conexión con el servidor.' });
