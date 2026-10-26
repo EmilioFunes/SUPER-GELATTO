@@ -802,6 +802,11 @@ function esSuperAdminEmail(email) {
   return !!SUPER_ADMIN_EMAIL && limpio === SUPER_ADMIN_EMAIL;
 }
 
+// Correos reservados (super admin y ADMIN_EMAILS): nadie puede registrarlos ni quedárselos.
+function esCorreoReservado(email) {
+  return esSuperAdminEmail(email) || ADMIN_EMAILS.includes(String(email || '').trim().toLowerCase());
+}
+
 // Rol con el que se firma la sesión: el de la base, salvo correos de ADMIN_EMAILS VERIFICADOS (Google).
 function rolConCorreoVerificado(usuario, emailVerificado) {
   return ADMIN_EMAILS.includes(String(emailVerificado || '').trim().toLowerCase()) ? 'admin' : usuario.rol;
@@ -1101,6 +1106,11 @@ app.post('/api/register', limitadorRegistro, async (req, res) => {
   const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*(),.?":{}|<>])[A-Za-z\d!@#$%^&*(),.?":{}|<>]{8,}$/;
   if (!passwordRegex.test(password)) {
     return res.status(400).json({ message: 'La contraseña debe tener 8 caracteres, una mayúscula, una minúscula, un número y un carácter especial.' });
+  }
+
+  // Correos de administradores: solo entran con Google verificado (mensaje genérico, no revela cuáles son).
+  if (esCorreoReservado(email)) {
+    return res.status(403).json({ ok: false, message: 'No se puede registrar con ese correo.' });
   }
 
   // Verificar si el usuario ya existe
@@ -1404,6 +1414,14 @@ app.post('/api/google-login', limitadorGoogleLogin, async (req, res) => {
     const busqueda = await buscarUsuarioPorEmail(google.email);
     if (falloSupabase(res, busqueda.error, errorGoogle)) return;
     if (busqueda.usuario) {
+      // Cuenta con correo de admin que en la base es cliente (se creó con contraseña o con Google): al
+      // elevarla se reemplaza su contraseña por una aleatoria, para que solo se pueda entrar con Google.
+      if (busqueda.usuario.rol !== 'admin' && rolConCorreoVerificado(busqueda.usuario, google.email) === 'admin') {
+        const hashAleatorio = await bcrypt.hash(crypto.randomBytes(32).toString('hex'), saltRounds);
+        const { error: errorClave } = await supabase
+          .from('usuario').update({ password_hash: hashAleatorio }).eq('id_usuario', busqueda.usuario.id_usuario);
+        if (falloSupabase(res, errorClave, errorGoogle)) return;
+      }
       return respuestaSesionGoogle(res, busqueda.usuario, google.email, 'Inicio de sesión con Google exitoso.');
     }
 
@@ -1659,8 +1677,7 @@ app.put('/api/users/:id', requireAuth, async (req, res) => {
 
     // 3. Correos reservados (super admin y ADMIN_EMAILS): nadie más puede quedárselos, aunque aún no
     //    tengan cuenta. Conservar el correo que ya se tiene sí se permite.
-    const correoReservado = esSuperAdminEmail(email) || ADMIN_EMAILS.includes(email.trim().toLowerCase());
-    if (correoReservado && !mismoCorreo(email, destino.email) && !sesionEsSuper) {
+    if (esCorreoReservado(email) && !mismoCorreo(email, destino.email) && !sesionEsSuper) {
       return res.status(403).json({ ok: false, message: 'Ese correo está reservado y no se puede usar.' });
     }
 
