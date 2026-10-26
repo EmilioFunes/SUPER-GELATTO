@@ -40,6 +40,8 @@ const groqFalso = async (parametros) => {
 const nombresHerramientas = (llamada) => (llamada?.tools || []).map((t) => t.function.name);
 const mensajeHerramienta = () => llamadasGroq[1]?.messages.find((m) => m.role === 'tool');
 const borradosUsuario = () => fake.consultas('usuario', 'delete');
+// Las acciones que modifican datos ya no se ejecutan solas: el servidor propone y el admin confirma con el token.
+const confirmar = (propuesta, cabeceras = tokenAdmin()) => chat({ confirmar: propuesta.body.tokenConfirmacion }, cabeceras);
 
 function prepararFake() {
   fake.reiniciar();
@@ -65,7 +67,7 @@ beforeEach(() => {
   prepararFake();
 });
 
-const HERRAMIENTAS_ADMIN = ['getAllUsers', 'getAllOrders', 'deleteUser', 'deleteProduct', 'addProduct'];
+const HERRAMIENTAS_ADMIN = ['getAllUsers', 'getAllOrders', 'deleteUser', 'deleteProduct', 'addProduct', 'getSalesSummary'];
 
 describe('identidad: solo el token decide', () => {
   it('sin token, aunque el cuerpo diga userRole admin: el modelo no recibe herramientas de admin', async () => {
@@ -104,6 +106,8 @@ describe('identidad: solo el token decide', () => {
     const res = await chat({ message: 'elimina al usuario 50' }, tokenAdmin());
     expect(res.status).toBe(200);
     expect(nombresHerramientas(llamadasGroq[0])).toEqual(expect.arrayContaining(HERRAMIENTAS_ADMIN));
+    expect(borradosUsuario()).toHaveLength(0); // solo propuesta
+    await confirmar(res);
     expect(borradosUsuario()).toHaveLength(1);
     expect(borradosUsuario()[0].filtros).toContainEqual(['eq', 'id_usuario', 50]);
   });
@@ -150,35 +154,42 @@ describe('runSQLQuery eliminado', () => {
 describe('deleteUser: mismas reglas que la ruta de admin', () => {
   it('nadie puede borrar al super admin (SUPER_ADMIN_EMAIL), ni siquiera él mismo', async () => {
     guion = [pideHerramienta('deleteUser', { identifier: SUPER }), texto('No se pudo.')];
-    await chat({ message: 'elimina a jefe' }, tokenAdmin());
+    const res = await chat({ message: 'elimina a jefe' }, tokenAdmin());
+    const conf = await confirmar(res);
     expect(borradosUsuario()).toHaveLength(0);
-    expect(mensajeHerramienta().content).toMatch(/protegida/i);
+    expect(conf.body.response).toMatch(/protegida/i);
   });
 
   it('un admin no puede borrarse a sí mismo', async () => {
     guion = [pideHerramienta('deleteUser', { identifier: '1' }), texto('No se pudo.')];
-    await chat({ message: 'elimina al usuario 1' }, tokenAdmin());
+    const res = await chat({ message: 'elimina al usuario 1' }, tokenAdmin());
+    const conf = await confirmar(res);
     expect(borradosUsuario()).toHaveLength(0);
-    expect(mensajeHerramienta().content).toMatch(/propia cuenta/i);
+    expect(conf.body.response).toMatch(/propia cuenta/i);
   });
 
   it('un admin normal no puede borrar a otro admin; el super admin sí', async () => {
     guion = [pideHerramienta('deleteUser', { identifier: '1' }), texto('No.')];
-    await chat({ message: 'elimina al usuario 1' }, bearer({ id_usuario: 50, email: 'otro@example.com', rol: 'admin' }));
+    const otroAdmin = bearer({ id_usuario: 50, email: 'otro@example.com', rol: 'admin' });
+    const res1 = await chat({ message: 'elimina al usuario 1' }, otroAdmin);
+    await confirmar(res1, otroAdmin);
     expect(borradosUsuario()).toHaveLength(0);
 
     llamadasGroq = [];
     prepararFake();
     guion = [pideHerramienta('deleteUser', { identifier: '1' }), texto('Hecho.')];
-    await chat({ message: 'elimina al usuario 1' }, tokenSuper());
+    const res2 = await chat({ message: 'elimina al usuario 1' }, tokenSuper());
+    await confirmar(res2, tokenSuper());
     expect(borradosUsuario()).toHaveLength(1);
   });
 
   it('el resultado de la herramienta no expone detalles internos del error', async () => {
     fake.responder('usuario', 'delete', { data: null, error: { message: 'violates foreign key constraint secreto_interno' } });
     guion = [pideHerramienta('deleteUser', { identifier: '50' }), texto('No se pudo.')];
-    await chat({ message: 'elimina al usuario 50' }, tokenAdmin());
-    expect(mensajeHerramienta().content).not.toContain('secreto_interno');
+    const res = await chat({ message: 'elimina al usuario 50' }, tokenAdmin());
+    const conf = await confirmar(res);
+    expect(JSON.stringify(conf.body)).not.toContain('secreto_interno');
+    expect(conf.body.response).toMatch(/error/i);
   });
 });
 
