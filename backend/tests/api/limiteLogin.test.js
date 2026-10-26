@@ -8,6 +8,26 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import request from 'supertest';
 import { crearFakeSupabase } from '../helpers/fakeSupabase.js';
 import { cargarServidor, authAdmin } from '../helpers/cargarServidor.js';
+import http from 'node:http';
+
+// POST con http de Node: devuelve { status, body } aunque el servidor responda sin leer todo el cuerpo.
+function postCrudo(app, ruta, cuerpo) {
+  return new Promise((resolve, reject) => {
+    const servidor = app.listen(0, () => {
+      const pedido = http.request(
+        { port: servidor.address().port, path: ruta, method: 'POST',
+          headers: { 'content-type': 'application/json', 'content-length': Buffer.byteLength(cuerpo) } },
+        (res) => {
+          let datos = '';
+          res.on('data', (c) => (datos += c));
+          res.on('end', () => { servidor.close(); resolve({ status: res.statusCode, body: datos }); });
+        },
+      );
+      pedido.on('error', (e) => { servidor.close(); reject(e); });
+      pedido.end(cuerpo);
+    });
+  });
+}
 
 const LIMITE = 2;
 const RUTAS = ['/api/login', '/api/google-login', '/api/register', '/api/forgot-password', '/api/admin/faceid/rekognition-login'];
@@ -92,8 +112,11 @@ describe('tamaño máximo del cuerpo', () => {
     expect(res.status).toBe(413);
   });
 
-  it('crear producto con imagen de 3 MB: sin sesión -> 401 (antes de leer el cuerpo)', async () => {
-    const res = await request(app).post('/api/admin/products').send({ name: 'X', price: 1000, image: texto(3 * MB) });
+  // Con supertest, una respuesta que llega antes de terminar de subir el cuerpo corta la conexión
+  // (ECONNRESET), así que esta prueba usa http de Node directamente. Se mandan 9 MB: si el cuerpo se
+  // leyera antes de mirar la sesión, la respuesta sería 413; debe ser 401.
+  it('crear producto con 9 MB sin sesión -> 401, no 413 (la sesión se mira antes de leer el cuerpo)', async () => {
+    const res = await postCrudo(app, '/api/admin/products', JSON.stringify({ name: 'X', price: 1000, image: texto(9 * MB) }));
     expect(res.status).toBe(401);
   });
 
