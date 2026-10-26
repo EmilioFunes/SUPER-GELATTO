@@ -10,6 +10,7 @@ import {
 import Model3DPreview from '../components/Model3DPreview';
 import CapturaFacial from '../components/CapturaFacial';
 import { apiFetch } from '../utils/api';
+import { soloVentasCobradas } from '../utils/ingresos';
 import { useCart } from '../context/CartContext';
 
 const getProductFallbackImage = (name = '') => {
@@ -79,10 +80,12 @@ const AdminDashboard = ({ user, onLogout }) => {
   };
 
   // Helper para calcular ingresos filtrados, tasa de ventas y evolución temporal
-  const computeRevenueStats = (salesList, period) => {
-    if (!Array.isArray(salesList)) {
+  const computeRevenueStats = (allSales, period) => {
+    if (!Array.isArray(allSales)) {
       return { filteredSales: [], totalRevenue: 0, salesCount: 0, growthRate: 0, trend: 'estable', prevTotal: 0 };
     }
+    // Solo cuentan las ventas cobradas (no Pendiente, Fallido ni Cancelado)
+    const salesList = soloVentasCobradas(allSales);
 
     const now = Date.now();
     const DAY_MS = 24 * 60 * 60 * 1000;

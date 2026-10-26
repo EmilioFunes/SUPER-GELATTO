@@ -19,9 +19,10 @@ export const JWT_SECRET_PRUEBA = 'secreto-solo-para-pruebas';
 // Opciones:
 //  - sinSupabase: true -> sin SUPABASE_URL ni llaves: server.js usa su base simulada en memoria (mockDb).
 //  - produccion: true -> NODE_ENV=production (el servidor debe negarse a arrancar sin Supabase).
+//  - correo: función que recibe cada correo enviado (sendMail) en vez de usar SMTP/Ethereal reales.
 //  - limitePagos: tope de peticiones por minuto a /api/payments/process (por defecto muy alto para que
 //    las pruebas no choquen con el límite de intentos).
-export function cargarServidor(fake, { sinSupabase = false, limitePagos = 100000, produccion = false, render = false } = {}) {
+export function cargarServidor(fake, { sinSupabase = false, limitePagos = 100000, produccion = false, render = false, correo = null } = {}) {
   // Cadena vacía (no delete): así dotenv no vuelve a leerlas de un .env local.
   process.env.SUPABASE_URL = sinSupabase ? '' : 'http://supabase.fake.local';
   process.env.SUPABASE_SERVICE_ROLE_KEY = sinSupabase ? '' : 'service-role-key-falsa';
@@ -46,6 +47,21 @@ export function cargarServidor(fake, { sinSupabase = false, limitePagos = 100000
       filename: rutaSupabase,
       loaded: true,
       exports: { createClient: () => fake.client },
+    };
+  }
+
+  if (correo) {
+    const rutaNodemailer = requireNode.resolve('nodemailer');
+    const transporte = { sendMail: async (mensaje) => (correo(mensaje), { messageId: 'prueba' }) };
+    requireNode.cache[rutaNodemailer] = {
+      id: rutaNodemailer,
+      filename: rutaNodemailer,
+      loaded: true,
+      exports: {
+        createTransport: () => transporte,
+        createTestAccount: async () => ({ smtp: { host: 'x', port: 25, secure: false }, user: 'u', pass: 'p' }),
+        getTestMessageUrl: () => false,
+      },
     };
   }
 

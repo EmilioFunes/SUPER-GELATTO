@@ -642,12 +642,15 @@ async function sendStatusUpdateEmail({ saleId, customerEmail, customerName, newS
   try {
     const emailTransporter = await getTransporter();
     const fromEmail = process.env.SMTP_USER || 'no-reply@supergelatto.com';
-    const orderCode = `#SG-${saleId}`;
-    const formattedTotal = typeof total === 'number' ? `$ ${total.toLocaleString('es-CO')}` : (total || '');
+    // Todo lo que viene del usuario, de la URL o de la base va escapado antes de entrar al HTML.
+    const orderCode = escapeHtml(`#SG-${saleId}`);
+    const safeName = escapeHtml(customerName || 'Cliente');
+    const safeStatus = escapeHtml(newStatus);
+    const formattedTotal = escapeHtml(typeof total === 'number' ? `$ ${total.toLocaleString('es-CO')}` : (total || ''));
 
     let statusBg = '#d4af37';
     let statusText = 'Actualización de Pedido';
-    let statusMessage = `El estado de tu pedido <strong>${orderCode}</strong> ha sido actualizado a <strong>${newStatus}</strong>.`;
+    let statusMessage = `El estado de tu pedido <strong>${orderCode}</strong> ha sido actualizado a <strong>${safeStatus}</strong>.`;
 
     switch (newStatus) {
       case 'En proceso':
@@ -682,7 +685,7 @@ async function sendStatusUpdateEmail({ saleId, customerEmail, customerName, newS
         </div>
 
         <div style="padding: 28px 24px;">
-          <p style="font-size: 16px; color: #e5e5e5; margin-top: 0;">Hola <strong style="color: #ffffff;">${customerName || 'Cliente'}</strong>,</p>
+          <p style="font-size: 16px; color: #e5e5e5; margin-top: 0;">Hola <strong style="color: #ffffff;">${safeName}</strong>,</p>
           <p style="font-size: 15px; color: #cccccc; line-height: 1.6;">
             ${statusMessage}
           </p>
@@ -690,7 +693,7 @@ async function sendStatusUpdateEmail({ saleId, customerEmail, customerName, newS
           <div style="background-color: #171717; border: 1px solid #333333; border-radius: 12px; padding: 22px; margin: 25px 0; text-align: center;">
             <span style="font-size: 11px; color: #a3a3a3; text-transform: uppercase; letter-spacing: 1px; display: block; margin-bottom: 10px;">Nuevo Estado del Pedido</span>
             <div style="display: inline-block; background-color: ${statusBg}; color: #000000; font-weight: bold; font-size: 15px; padding: 8px 24px; border-radius: 20px; text-transform: uppercase; letter-spacing: 1px;">
-              ${newStatus}
+              ${safeStatus}
             </div>
             
             <div style="margin-top: 20px; border-top: 1px dashed #333333; padding-top: 16px; display: flex; justify-content: space-around;">
