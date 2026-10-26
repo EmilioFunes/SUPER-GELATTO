@@ -178,7 +178,7 @@ const functions = {
     // Obtener usuario objetivo
     const { data: targetUser, error: errorBusqueda } = await supabase.from('usuario')
       .select('id_usuario, nombre, email, rol')
-      .eq(isEmail ? 'email' : 'id_usuario', isEmail ? ident.toLowerCase() : ident)
+      .eq(isEmail ? 'email' : 'id_usuario', ident)
       .single();
 
     // PGRST116 = ninguna fila (usuario inexistente); cualquier otro error es una falla de la base.
