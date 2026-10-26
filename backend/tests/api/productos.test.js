@@ -162,7 +162,7 @@ describe('k. guardar model_3d_url (GET /api/admin/products/:id/model-3d)', () =>
   it('guarda { model_3d_url } en producto', async () => {
     const id = await productoConTarea3D();
 
-    const res = await request(app).get(`/api/admin/products/${id}/model-3d`);
+    const res = await request(app).get(`/api/admin/products/${id}/model-3d`).set(authAdmin());
 
     const ups = fake.consultas('producto', 'update');
     expect(ups).toHaveLength(1);
@@ -175,7 +175,7 @@ describe('k. guardar model_3d_url (GET /api/admin/products/:id/model-3d)', () =>
     const id = await productoConTarea3D();
     fake.responder('producto', 'update', ERROR_BASE);
 
-    const res = await request(app).get(`/api/admin/products/${id}/model-3d`);
+    const res = await request(app).get(`/api/admin/products/${id}/model-3d`).set(authAdmin());
 
     expect(res.status).toBeGreaterThanOrEqual(500);
     expect(res.body.estado).not.toBe('listo');

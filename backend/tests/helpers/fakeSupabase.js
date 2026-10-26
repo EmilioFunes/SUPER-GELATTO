@@ -144,7 +144,11 @@ export function crearFakeSupabase() {
       b[n] = encadenar(n);
     }
     // select() tras insert/update solo pide devolver filas; no cambia la operación.
-    b.select = () => b;
+    // En una lectura se guardan las columnas pedidas (llamada.columnas) para poder comprobarlas.
+    b.select = (cols) => {
+      if (llamada.op === 'select') llamada.columnas = cols;
+      return b;
+    };
     for (const op of ['insert', 'update', 'upsert', 'delete']) {
       b[op] = (payload) => {
         llamada.op = op;

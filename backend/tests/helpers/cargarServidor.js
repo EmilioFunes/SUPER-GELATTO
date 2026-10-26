@@ -34,15 +34,18 @@ export const GOOGLE_CLIENT_ID_PRUEBA = 'cliente-google-de-prueba.apps.googleuser
 //  - groq: async (parametros) => respuesta. Reemplaza a groq-sdk (chat.completions.create): las pruebas
 //    NUNCA llaman a Groq de verdad. Sin esta opción, cualquier llamada al modelo lanza un error.
 //  - limiteChatbot: tope de peticiones por minuto a /api/chatbot (por defecto muy alto).
+//  - limiteLogin: tope de intentos por ventana en login, google-login, register, forgot-password y
+//    rekognition-login (por defecto muy alto).
 export function cargarServidor(fake, { sinSupabase = false, limitePagos = 100000, produccion = false, render = false, correo = null,
   jwtSecret = JWT_SECRET_PRUEBA, googleClientId = GOOGLE_CLIENT_ID_PRUEBA, adminEmails = '', superAdmin = '',
-  simulacion = false, verificadorGoogle = null, groq = null, limiteChatbot = 100000 } = {}) {
+  simulacion = false, verificadorGoogle = null, groq = null, limiteChatbot = 100000, limiteLogin = 100000 } = {}) {
   // Cadena vacía (no delete): así dotenv no vuelve a leerlas de un .env local.
   process.env.SUPABASE_URL = sinSupabase ? '' : 'http://supabase.fake.local';
   process.env.SUPABASE_SERVICE_ROLE_KEY = sinSupabase ? '' : 'service-role-key-falsa';
   process.env.SUPABASE_KEY = '';
   process.env.PAYMENT_RATE_LIMIT_MAX = String(limitePagos);
   process.env.CHATBOT_RATE_LIMIT_MAX = String(limiteChatbot);
+  process.env.LOGIN_RATE_LIMIT_MAX = String(limiteLogin);
   // Llave ficticia (no vacía) para que chatbot.js cree el cliente; el cliente es el falso de abajo.
   process.env.GROQ_API_KEY = 'groq-llave-falsa-de-prueba';
   process.env.JWT_SECRET = jwtSecret;
