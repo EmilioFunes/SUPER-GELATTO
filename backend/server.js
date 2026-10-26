@@ -1,7 +1,11 @@
 require('dotenv').config();
 
-// Desactivar temporalmente la verificación estricta de SSL en Node para entornos locales con certificados auto-firmados / proxys
-if (process.env.NODE_ENV !== 'production') {
+// Producción = NODE_ENV=production o Render (Render define RENDER aunque NODE_ENV no esté puesto).
+const esProduccion = process.env.NODE_ENV === 'production' || !!process.env.RENDER;
+
+// Desactivar temporalmente la verificación estricta de SSL en Node para entornos locales con certificados auto-firmados / proxys.
+// Nunca en producción: la verificación del login con Google descarga certificados por HTTPS.
+if (!esProduccion) {
   process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 }
 
@@ -497,7 +501,6 @@ if (!supabase && (process.env.NODE_ENV === 'production' || process.env.RENDER)) 
 // ─── Secreto de las sesiones (JWT) ──────────────────────────
 // Un único secreto: JWT_SECRET. En producción es obligatorio (32+ caracteres); fuera de producción,
 // si falta, se genera uno aleatorio al arrancar (las sesiones se pierden al reiniciar). Nunca uno fijo.
-const esProduccion = process.env.NODE_ENV === 'production' || !!process.env.RENDER;
 const JWT_LONGITUD_MINIMA = 32;
 const JWT_ALGORITMO = 'HS256';
 const JWT_SECRET = (() => {

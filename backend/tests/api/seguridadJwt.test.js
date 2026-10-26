@@ -176,3 +176,13 @@ describe('GET /api/admin/dashboard: el panel sabe quién es super admin sin corr
     expect(comoOtro.body.soySuperAdmin).toBe(false);
   });
 });
+
+describe('validación TLS en producción', () => {
+  // verifyIdToken descarga los certificados de Google: en producción la validación TLS debe quedar activa,
+  // también en Render aunque NODE_ENV no sea 'production'.
+  it('en Render (sin NODE_ENV=production) no se desactiva NODE_TLS_REJECT_UNAUTHORIZED', () => {
+    delete process.env.NODE_TLS_REJECT_UNAUTHORIZED;
+    cargarServidor({ client: {} }, { render: true });
+    expect(process.env.NODE_TLS_REJECT_UNAUTHORIZED).not.toBe('0');
+  });
+});
