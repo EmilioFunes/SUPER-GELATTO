@@ -75,9 +75,8 @@ export async function apiFetch(path, options = {}) {
     headers,
   });
 
-  if (response.status === 401) {
+  if (response.status === 401 || response.status === 403) {
     clearSessionAndRedirect();
-    // Return the response anyway so callers can inspect it if needed
   }
 
   return response;

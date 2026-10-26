@@ -4,7 +4,8 @@ import {
   Users, ShoppingBag, IceCream, Trash2, Shield, Plus, 
   RefreshCw, AlertTriangle, Box, Sparkles, Key, CheckCircle, 
   X, Camera, Loader2, Star, Image, Upload, Eye,
-  Mail, Receipt, Edit2, Save, CheckCircle2
+  Mail, Receipt, Edit2, Save, CheckCircle2,
+  TrendingUp, TrendingDown, Calendar, Clock, DollarSign, Filter, ChevronRight, BarChart2
 } from 'lucide-react';
 import Model3DPreview from '../components/Model3DPreview';
 import CapturaFacial from '../components/CapturaFacial';
@@ -49,6 +50,98 @@ const AdminDashboard = ({ user, onLogout }) => {
   const [newAdminForm, setNewAdminForm] = useState({ name: '', lastName: '', email: '', password: '' });
   const [createAdminLoading, setCreateAdminLoading] = useState(false);
   const [createAdminMsg, setCreateAdminMsg] = useState({ type: '', text: '' });
+
+  // --- Estados para Ingresos Totales, Filtros de Periodo y Detalle de Ventas ---
+  const [selectedPeriod, setSelectedPeriod] = useState('all'); // 'week', 'month', '2months', 'all'
+  const [showRevenueDetailModal, setShowRevenueDetailModal] = useState(false);
+
+  // Helper para desglosar la fecha de cada venta individual en Hora, Día, Mes y Año
+  const getSaleDateDetails = (dateStr) => {
+    if (!dateStr) return { hora: 'N/A', dia: 'N/A', diaNum: 'N/A', mes: 'N/A', ano: 'N/A', fullFormatted: 'N/A' };
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return { hora: 'N/A', dia: 'N/A', diaNum: 'N/A', mes: 'N/A', ano: 'N/A', fullFormatted: 'N/A' };
+
+    const hora = d.toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
+    const diaNum = d.getDate();
+    const diaSemana = d.toLocaleDateString('es-CO', { weekday: 'long' });
+    const dia = `${diaSemana.charAt(0).toUpperCase() + diaSemana.slice(1)} ${diaNum}`;
+    const mes = d.toLocaleDateString('es-CO', { month: 'long' }).toUpperCase();
+    const ano = d.getFullYear();
+
+    return {
+      hora,
+      diaNum,
+      dia,
+      mes,
+      ano,
+      fullFormatted: `${dia} de ${mes.toLowerCase()}, ${ano} - ${hora}`
+    };
+  };
+
+  // Helper para calcular ingresos filtrados, tasa de ventas y evolución temporal
+  const computeRevenueStats = (salesList, period) => {
+    if (!Array.isArray(salesList)) {
+      return { filteredSales: [], totalRevenue: 0, salesCount: 0, growthRate: 0, trend: 'estable', prevTotal: 0 };
+    }
+
+    const now = Date.now();
+    const DAY_MS = 24 * 60 * 60 * 1000;
+
+    let daysLimit = Infinity;
+    if (period === 'week') daysLimit = 7;
+    else if (period === 'month') daysLimit = 30;
+    else if (period === '2months') daysLimit = 60;
+
+    // Ventas del periodo actual
+    const currentSales = salesList.filter(s => {
+      if (!s.fecha) return true;
+      const t = new Date(s.fecha).getTime();
+      if (isNaN(t)) return true;
+      const diff = (now - t) / DAY_MS;
+      return diff <= daysLimit;
+    });
+
+    // Ventas del periodo equivalente anterior (para calcular la tasa de crecimiento)
+    const previousSales = salesList.filter(s => {
+      if (!s.fecha || daysLimit === Infinity) return false;
+      const t = new Date(s.fecha).getTime();
+      if (isNaN(t)) return false;
+      const diff = (now - t) / DAY_MS;
+      return diff > daysLimit && diff <= (daysLimit * 2);
+    });
+
+    const currentTotal = currentSales.reduce((acc, s) => acc + (Number(s.total) || 0), 0);
+    const currentCount = currentSales.length;
+
+    const prevTotal = previousSales.reduce((acc, s) => acc + (Number(s.total) || 0), 0);
+
+    let growthRate = 0;
+    if (daysLimit === Infinity) {
+      if (salesList.length >= 2) {
+        const mid = Math.floor(salesList.length / 2);
+        const recentHalf = salesList.slice(0, mid);
+        const olderHalf = salesList.slice(mid);
+        const rTot = recentHalf.reduce((a, s) => a + (Number(s.total) || 0), 0);
+        const oTot = olderHalf.reduce((a, s) => a + (Number(s.total) || 0), 0);
+        growthRate = oTot > 0 ? ((rTot - oTot) / oTot) * 100 : (rTot > 0 ? 100 : 0);
+      }
+    } else {
+      growthRate = prevTotal > 0 ? ((currentTotal - prevTotal) / prevTotal) * 100 : (currentTotal > 0 ? 100 : 0);
+    }
+
+    const trend = growthRate > 0 ? 'ascendente' : growthRate < 0 ? 'descendente' : 'estable';
+
+    return {
+      filteredSales: currentSales,
+      totalRevenue: currentTotal,
+      salesCount: currentCount,
+      growthRate: Math.round(growthRate * 10) / 10,
+      trend,
+      prevTotal
+    };
+  };
+
+  const revenueStats = computeRevenueStats(dashboardData.sales || [], selectedPeriod);
 
   const handleCreateAdmin = async (e) => {
     e.preventDefault();
@@ -895,22 +988,131 @@ const AdminDashboard = ({ user, onLogout }) => {
           </div>
         </header>
 
-        {/* STATS CARDS */}
+        {/* FILTROS DE PERIODO Y CONTROL DE VENTAS */}
+        <div className="mb-6 bg-[#0a0a0a] border border-white/5 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-xl backdrop-blur-md">
+          <div className="flex items-center gap-2 text-xs font-bold text-white/60 uppercase tracking-wider">
+            <Filter size={16} className="text-gold-premium" />
+            <span>Filtro de Periodo de Ingresos y Ventas:</span>
+          </div>
+
+          <div className="flex items-center gap-2 overflow-x-auto hide-scrollbar pb-1 sm:pb-0">
+            {[
+              { id: 'week', label: 'Última semana' },
+              { id: 'month', label: 'Último mes' },
+              { id: '2months', label: 'Últimos 2 meses' },
+              { id: 'all', label: 'Últimos años (Todos)' }
+            ].map(p => (
+              <button
+                key={p.id}
+                onClick={() => setSelectedPeriod(p.id)}
+                className={`px-4 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
+                  selectedPeriod === p.id
+                    ? 'bg-gold-premium text-black shadow-lg shadow-gold-premium/20 font-bold scale-[1.02]'
+                    : 'bg-white/5 text-white/60 hover:text-white hover:bg-white/10'
+                }`}
+              >
+                <Calendar size={13} />
+                <span>{p.label}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* STATS CARDS CON INGRESOS Y TASA DE EVOLUCIÓN */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 mb-8 sm:mb-12">
-          {[
-            { label: 'Ingresos Totales', value: formatCurrency(dashboardData.stats.totalRevenue), icon: ShoppingBag, color: 'text-gold-premium' },
-            { label: 'Ventas Realizadas', value: dashboardData.stats.totalSales, icon: ShoppingBag, color: 'text-white' },
-            { label: 'Clientes Registrados', value: dashboardData.stats.activeUsers, icon: Users, color: 'text-white' },
-          ].map((stat, i) => (
-            <div key={i} className="group relative bg-[#0a0a0a] border border-white/5 rounded-3xl p-6 sm:p-8 hover:border-gold-premium/30 transition-all duration-500 overflow-hidden shadow-lg">
-              <div className="absolute top-0 right-0 p-8 text-white/5 group-hover:text-gold-premium/10 transition-colors duration-500">
-                <stat.icon size={80} />
-              </div>
-              <h3 className="text-white/30 text-xs tracking-widest uppercase mb-4 font-bold">{stat.label}</h3>
-              <p className={`text-3xl sm:text-4xl font-light ${stat.color} relative z-10 tracking-tighter`}>{stat.value}</p>
-              <div className="mt-4 h-1 w-12 bg-gold-premium/20 group-hover:w-full transition-all duration-700"></div>
+          
+          {/* TARJETA INGRESOS TOTALES (CLICABLE CON DETALLE INDIVIDUAL) */}
+          <div 
+            onClick={() => setShowRevenueDetailModal(true)}
+            className="group relative bg-[#0a0a0a] border border-gold-premium/30 rounded-3xl p-6 sm:p-8 hover:border-gold-premium transition-all duration-500 overflow-hidden shadow-2xl cursor-pointer hover:scale-[1.01]"
+            title="Haz clic para ver el desglose de cada venta individual (Hora, Día, Mes, Año)"
+          >
+            <div className="absolute top-0 right-0 p-8 text-gold-premium/10 group-hover:text-gold-premium/20 transition-colors duration-500">
+              <ShoppingBag size={80} />
             </div>
-          ))}
+
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-gold-premium text-xs tracking-widest uppercase font-bold flex items-center gap-2">
+                <span>Ingresos Totales</span>
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-gold-premium/20 border border-gold-premium/40 font-mono">
+                  {selectedPeriod === 'week' ? 'Semana' : selectedPeriod === 'month' ? 'Mes' : selectedPeriod === '2months' ? '2 Meses' : 'Todos'}
+                </span>
+              </h3>
+              <span className="text-[11px] text-white/40 group-hover:text-gold-premium flex items-center gap-1 transition-colors">
+                Ver Detalle <ChevronRight size={14} />
+              </span>
+            </div>
+
+            <p className="text-3xl sm:text-4xl font-light text-gold-premium relative z-10 tracking-tighter">
+              {formatCurrency(revenueStats.totalRevenue)}
+            </p>
+
+            {/* BADGE DE TASA DE EVOLUCIÓN Y TENDENCIA */}
+            <div className="mt-4 flex items-center justify-between border-t border-white/5 pt-3">
+              <div className="flex items-center gap-2">
+                {revenueStats.trend === 'ascendente' ? (
+                  <span className="flex items-center gap-1 text-[11px] font-bold text-green-400 bg-green-500/10 px-2.5 py-1 rounded-full border border-green-500/20">
+                    <TrendingUp size={13} />
+                    +{revenueStats.growthRate}% Ascendente
+                  </span>
+                ) : revenueStats.trend === 'descendente' ? (
+                  <span className="flex items-center gap-1 text-[11px] font-bold text-red-400 bg-red-500/10 px-2.5 py-1 rounded-full border border-red-500/20">
+                    <TrendingDown size={13} />
+                    {revenueStats.growthRate}% Descendente
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-1 text-[11px] font-bold text-amber-400 bg-amber-500/10 px-2.5 py-1 rounded-full border border-amber-500/20">
+                    → {revenueStats.growthRate}% Estable
+                  </span>
+                )}
+              </div>
+              <span className="text-[10px] text-white/40 font-mono">
+                {revenueStats.salesCount} venta{revenueStats.salesCount === 1 ? '' : 's'}
+              </span>
+            </div>
+
+            <div className="mt-3 h-1 w-12 bg-gold-premium/20 group-hover:w-full transition-all duration-700"></div>
+          </div>
+
+          {/* TARJETA TASA DE VENTAS Y EVOLUCIÓN TEMPORAL */}
+          <div className="group relative bg-[#0a0a0a] border border-white/5 rounded-3xl p-6 sm:p-8 hover:border-white/20 transition-all duration-500 overflow-hidden shadow-lg">
+            <div className="absolute top-0 right-0 p-8 text-white/5 group-hover:text-white/10 transition-colors duration-500">
+              <BarChart2 size={80} />
+            </div>
+            <h3 className="text-white/40 text-xs tracking-widest uppercase mb-4 font-bold">Tasa de Ventas (Evolución)</h3>
+            
+            <div className="flex items-baseline gap-3 mb-2">
+              <span className="text-3xl sm:text-4xl font-light text-white tracking-tighter">
+                {revenueStats.salesCount}
+              </span>
+              <span className="text-xs text-white/40 uppercase tracking-wider font-semibold">Ventas Registradas</span>
+            </div>
+
+            <p className="text-xs text-white/50 leading-relaxed mb-3">
+              Evolución del volumen monetario comparado con el periodo anterior.
+            </p>
+
+            <div className="bg-white/5 rounded-2xl p-3 border border-white/5 flex items-center justify-between text-xs">
+              <span className="text-white/40">Monto Periodo Previo:</span>
+              <span className="font-mono text-white/70 font-semibold">{formatCurrency(revenueStats.prevTotal)}</span>
+            </div>
+
+            <div className="mt-4 h-1 w-12 bg-white/20 group-hover:w-full transition-all duration-700"></div>
+          </div>
+
+          {/* TARJETA CLIENTES REGISTRADOS */}
+          <div className="group relative bg-[#0a0a0a] border border-white/5 rounded-3xl p-6 sm:p-8 hover:border-white/20 transition-all duration-500 overflow-hidden shadow-lg">
+            <div className="absolute top-0 right-0 p-8 text-white/5 group-hover:text-white/10 transition-colors duration-500">
+              <Users size={80} />
+            </div>
+            <h3 className="text-white/40 text-xs tracking-widest uppercase mb-4 font-bold">Clientes Registrados</h3>
+            <p className="text-3xl sm:text-4xl font-light text-white relative z-10 tracking-tighter">
+              {dashboardData.stats.activeUsers || 0}
+            </p>
+            <p className="text-xs text-white/40 mt-3">Usuarios registrados con acceso a la plataforma.</p>
+            <div className="mt-4 h-1 w-12 bg-white/20 group-hover:w-full transition-all duration-700"></div>
+          </div>
+
         </div>
 
         {/* NAVIGATION TABS */}
@@ -2412,6 +2614,194 @@ const AdminDashboard = ({ user, onLogout }) => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DETALLE DE INGRESOS TOTALES Y CADA VENTA INDIVIDUAL (HORA, DÍA, MES, AÑO) */}
+      {showRevenueDetailModal && (
+        <div className="fixed inset-0 bg-black/85 backdrop-blur-md z-50 flex items-center justify-center p-4 sm:p-6 overflow-y-auto">
+          <div className="bg-[#0f0f12] border border-gold-premium/30 rounded-3xl p-6 sm:p-8 max-w-5xl w-full shadow-2xl relative my-auto animate-in zoom-in-95 duration-200">
+            
+            {/* BOTÓN CERRAR */}
+            <button
+              onClick={() => setShowRevenueDetailModal(false)}
+              className="absolute top-6 right-6 text-white/40 hover:text-white p-2 rounded-full hover:bg-white/10 transition-colors cursor-pointer"
+            >
+              <X size={22} />
+            </button>
+
+            {/* HEADER MODAL */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 pb-6 border-b border-white/10">
+              <div>
+                <div className="flex items-center gap-3 text-gold-premium mb-1">
+                  <ShoppingBag size={22} />
+                  <span className="text-xs uppercase tracking-[0.3em] font-bold">Informe de Ingresos y Desglose Temporal</span>
+                </div>
+                <h2 className="text-2xl sm:text-3xl font-light text-white">
+                  Detalle de <span className="text-gold-premium font-normal">Ventas e Ingresos Totales</span>
+                </h2>
+                <p className="text-xs text-white/40 mt-1">
+                  Consulta el registro cronológico desglosado por Hora, Día, Mes y Año para cada transacción.
+                </p>
+              </div>
+
+              {/* MONTO RESUMEN */}
+              <div className="bg-gold-premium/10 border border-gold-premium/40 rounded-2xl p-4 text-right">
+                <span className="text-[10px] uppercase tracking-widest text-gold-premium font-bold block mb-0.5">Ingreso Filtrado</span>
+                <span className="text-2xl font-light text-gold-premium font-mono font-semibold">
+                  {formatCurrency(revenueStats.totalRevenue)}
+                </span>
+              </div>
+            </div>
+
+            {/* SECCIÓN DE FILTROS DE PERIODO DENTRO DEL MODAL */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-black/40 border border-white/5 rounded-2xl p-4 mb-6">
+              <div className="flex items-center gap-2 text-xs text-white/60 font-medium">
+                <Filter size={15} className="text-gold-premium" />
+                <span>Filtrar periodo de consulta:</span>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {[
+                  { id: 'week', label: 'Última semana' },
+                  { id: 'month', label: 'Último mes' },
+                  { id: '2months', label: 'Últimos 2 meses' },
+                  { id: 'all', label: 'Todos los periodos (Años)' }
+                ].map(p => (
+                  <button
+                    key={p.id}
+                    onClick={() => setSelectedPeriod(p.id)}
+                    className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5 ${
+                      selectedPeriod === p.id
+                        ? 'bg-gold-premium text-black shadow-md font-bold'
+                        : 'bg-white/5 text-white/60 hover:text-white hover:bg-white/10'
+                    }`}
+                  >
+                    <Calendar size={12} />
+                    <span>{p.label}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* BARRA DE TASA DE EVOLUCIÓN / TENDENCIA DENTRO DEL MODAL */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+              <div className="bg-white/[0.02] border border-white/5 rounded-2xl p-4">
+                <span className="text-[10px] uppercase tracking-widest text-white/40 font-bold block mb-1">Total Transacciones</span>
+                <span className="text-xl font-bold text-white">{revenueStats.salesCount} ventas</span>
+              </div>
+
+              <div className="bg-white/[0.02] border border-white/5 rounded-2xl p-4">
+                <span className="text-[10px] uppercase tracking-widest text-white/40 font-bold block mb-1">Tasa de Evolución</span>
+                <div className="flex items-center gap-2">
+                  {revenueStats.trend === 'ascendente' ? (
+                    <span className="text-sm font-bold text-green-400 flex items-center gap-1">
+                      <TrendingUp size={16} /> +{revenueStats.growthRate}% Ascendente
+                    </span>
+                  ) : revenueStats.trend === 'descendente' ? (
+                    <span className="text-sm font-bold text-red-400 flex items-center gap-1">
+                      <TrendingDown size={16} /> {revenueStats.growthRate}% Descendente
+                    </span>
+                  ) : (
+                    <span className="text-sm font-bold text-amber-400">→ {revenueStats.growthRate}% Estable</span>
+                  )}
+                </div>
+              </div>
+
+              <div className="bg-white/[0.02] border border-white/5 rounded-2xl p-4">
+                <span className="text-[10px] uppercase tracking-widest text-white/40 font-bold block mb-1">Monto Periodo Previo</span>
+                <span className="text-xl font-bold text-white/70">{formatCurrency(revenueStats.prevTotal)}</span>
+              </div>
+            </div>
+
+            {/* TABLA DE DETALLE INDIVIDUAL DE CADA VENTA (CON HORA, DÍA, MES, AÑO) */}
+            <div className="border border-white/10 rounded-2xl overflow-hidden bg-black/40">
+              <div className="max-h-[380px] overflow-y-auto hide-scrollbar">
+                <table className="w-full text-left border-collapse min-w-[700px]">
+                  <thead className="sticky top-0 bg-[#141418] border-b border-white/10 z-10">
+                    <tr className="text-white/40 text-[10px] uppercase tracking-[0.2em] font-bold">
+                      <th className="p-4">Orden</th>
+                      <th className="p-4">Cliente</th>
+                      <th className="p-4">Desglose Temporal (Hora / Día / Mes / Año)</th>
+                      <th className="p-4">Monto Total</th>
+                      <th className="p-4">Estado</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-white/5 text-xs">
+                    {revenueStats.filteredSales.map((s, idx) => {
+                      const dateObj = getSaleDateDetails(s.fecha);
+                      return (
+                        <tr key={s.id_venta || idx} className="hover:bg-white/[0.03] transition-colors">
+                          
+                          {/* ID ORDEN */}
+                          <td className="p-4 font-mono text-gold-premium font-semibold">
+                            #SG-{s.id_venta}
+                          </td>
+
+                          {/* CLIENTE */}
+                          <td className="p-4">
+                            <p className="font-medium text-white">{s.nombre || 'Cliente'}</p>
+                            <p className="text-[11px] text-white/40">{s.email || 'Sin correo'}</p>
+                          </td>
+
+                          {/* DESGLOSE DETALLADO DE FECHA: HORA, DÍA, MES, AÑO */}
+                          <td className="p-4">
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <span className="bg-gold-premium/10 text-gold-premium border border-gold-premium/30 px-2 py-0.5 rounded-lg text-[11px] font-mono flex items-center gap-1 font-semibold">
+                                <Clock size={11} /> {dateObj.hora}
+                              </span>
+                              <span className="bg-white/5 text-white/80 border border-white/10 px-2 py-0.5 rounded-lg text-[11px]">
+                                📅 {dateObj.dia}
+                              </span>
+                              <span className="bg-white/5 text-white/80 border border-white/10 px-2 py-0.5 rounded-lg text-[11px] font-bold">
+                                {dateObj.mes}
+                              </span>
+                              <span className="bg-white/5 text-white/50 border border-white/10 px-2 py-0.5 rounded-lg text-[11px] font-mono">
+                                {dateObj.ano}
+                              </span>
+                            </div>
+                          </td>
+
+                          {/* MONTO */}
+                          <td className="p-4 font-bold text-white text-sm">
+                            {formatCurrency(s.total)}
+                          </td>
+
+                          {/* ESTADO */}
+                          <td className="p-4">
+                            <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                              s.estado === 'En proceso' ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' :
+                              s.estado === 'En entrega' ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/20' :
+                              s.estado === 'Enviado' ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20' :
+                              s.estado === 'Cancelado' ? 'bg-red-500/10 text-red-400 border border-red-500/20' :
+                              'bg-green-500/10 text-green-400 border border-green-500/20'
+                            }`}>
+                              {s.estado || 'En proceso'}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+                {revenueStats.filteredSales.length === 0 && (
+                  <div className="p-12 text-center text-white/30 text-xs">
+                    No se encontraron registros de ventas para el periodo seleccionado.
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* PIE DEL MODAL */}
+            <div className="mt-6 pt-4 border-t border-white/10 flex justify-end">
+              <button
+                onClick={() => setShowRevenueDetailModal(false)}
+                className="px-6 py-2.5 bg-white/10 hover:bg-white/20 text-white font-semibold text-xs rounded-xl transition-all cursor-pointer"
+              >
+                Cerrar Detalle
+              </button>
+            </div>
+
           </div>
         </div>
       )}
