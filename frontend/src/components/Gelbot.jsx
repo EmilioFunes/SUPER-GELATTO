@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Send, Mic } from 'lucide-react';
 import { useCart } from '../context/CartContext';
+import { getToken } from '../utils/api';
 
 const parseInlineStyles = (text) => {
   if (typeof text !== 'string') return text;
@@ -129,29 +130,37 @@ const Gelbot = ({ user }) => {
     setIsLoading(true);
 
     try {
-      // Enviamos el historial para mantener contexto
-      const chatHistory = messages.map(m => ({
+      // Enviamos solo los últimos turnos para mantener contexto (el servidor acota igual).
+      const chatHistory = messages.slice(-20).map(m => ({
         role:    m.sender === 'bot' ? 'assistant' : 'user',
-        content: m.text
+        content: String(m.text || '')
       }));
+
+      // Quién eres lo decide el servidor con tu token de sesión (nunca datos que mande el navegador).
+      const token = getToken();
+      const headers = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
 
       const response = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/chatbot`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({
           message: input,
-          userId:  user?.id,
-          userName: user?.name,
-          userRole: user?.rol,
           history: chatHistory
         })
       });
 
+      const data = await response.json().catch(() => ({}));
+
+      // 400 (mensaje inválido) y 429 (demasiados mensajes) traen un mensaje en español para mostrar.
+      if ((response.status === 400 || response.status === 429) && data.message) {
+        setMessages(prev => [...prev, { id: Date.now() + 1, text: data.message, sender: 'bot' }]);
+        return;
+      }
       if (!response.ok) {
         throw new Error(`Error del servidor: ${response.status}`);
       }
 
-      const data = await response.json();
       if (data.error) throw new Error(data.error);
 
       // Acción: añadir producto al carrito
@@ -169,7 +178,11 @@ const Gelbot = ({ user }) => {
         text:       data.response || (data.action ? '' : '...'),
         sender:     'bot',
         action:     data.action,
-        actionData: data.actionData
+        actionData: data.actionData,
+        // Acción que modifica datos: el servidor solo la propone; aquí el admin la confirma o la cancela.
+        propuesta:  data.requiereConfirmacion && data.tokenConfirmacion
+          ? { token: data.tokenConfirmacion, resumen: String(data.resumen || ''), estado: 'pendiente' }
+          : null
       };
       setMessages(prev => [...prev, botMsg]);
 
@@ -193,6 +206,32 @@ const Gelbot = ({ user }) => {
     } finally {
       setIsLoading(false);
     }
+  };
+
+  // Responde a una propuesta del servidor: solo manda el token (nunca texto del chat) en una petición nueva.
+  const responderPropuesta = async (msgId, token, aceptar) => {
+    if (isLoading) return;
+    setIsLoading(true);
+    setMessages(prev => prev.map(m => m.id === msgId ? { ...m, propuesta: { ...m.propuesta, estado: 'resuelta' } } : m));
+    let texto;
+    try {
+      const authToken = getToken();
+      const headers = { 'Content-Type': 'application/json' };
+      if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
+      const response = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/chatbot`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(aceptar ? { confirmar: token } : { cancelar: token })
+      });
+      const data = await response.json().catch(() => ({}));
+      texto = data.response || data.message || 'No pude completar la acción.';
+    } catch (error) {
+      console.error('Error al confirmar la acción:', error);
+      texto = 'Ups, algo salió mal. Inténtalo de nuevo en un momento.';
+    } finally {
+      setIsLoading(false);
+    }
+    setMessages(prev => [...prev, { id: Date.now() + 1, text: texto, sender: 'bot' }]);
   };
 
   return (
@@ -236,6 +275,33 @@ const Gelbot = ({ user }) => {
                   }`}>
                     {msg.sender === 'user' ? msg.text : renderMessageText(msg.text)}
                   </div>
+
+                  {/* ── Confirmación de acción (Admin): texto como texto, nunca como HTML ── */}
+                  {msg.propuesta && (
+                    <div className="max-w-[90%] bg-black/60 border border-gold-premium/40 rounded-xl p-3 text-xs flex flex-col gap-2">
+                      <span className="text-white/90">{msg.propuesta.resumen}</span>
+                      {msg.propuesta.estado === 'pendiente' && (
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            disabled={isLoading}
+                            onClick={() => responderPropuesta(msg.id, msg.propuesta.token, true)}
+                            className="px-3 py-1 rounded-full bg-gold-premium text-background-dark font-bold disabled:opacity-50"
+                          >
+                            Confirmar
+                          </button>
+                          <button
+                            type="button"
+                            disabled={isLoading}
+                            onClick={() => responderPropuesta(msg.id, msg.propuesta.token, false)}
+                            className="px-3 py-1 rounded-full bg-white/10 text-white/80 hover:text-white disabled:opacity-50"
+                          >
+                            Cancelar
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   {/* ── Tabla de Usuarios (Admin) ── */}
                   {msg.action === 'showUsersTable' && msg.actionData && (

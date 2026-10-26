@@ -8,6 +8,9 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY
 );
 
+// Clave a comprobar contra los hashes: CLAVE_A_PROBAR=... node scripts/check-users.js (nunca en el código).
+const claveAProbar = process.env.CLAVE_A_PROBAR || '';
+
 async function testLogin() {
   console.log('--- Verificando usuarios en Supabase ---');
   const { data: users, error } = await supabase.from('usuario').select('id_usuario, email, rol, password_hash');
@@ -19,9 +22,10 @@ async function testLogin() {
 
   console.log(`Usuarios encontrados: ${users.length}`);
   for (const u of users) {
-    console.log(`  - [${u.id_usuario}] ${u.email} | rol: ${u.rol} | hash: ${u.password_hash?.slice(0, 20)}...`);
-    const match = await bcrypt.compare('gelato1234', u.password_hash || '');
-    console.log(`    ↳ ¿coincide con "gelato1234"? ${match ? '✅ SÍ' : '❌ NO'}`);
+    console.log(`  - [${u.id_usuario}] ${u.email} | rol: ${u.rol} | hash: (oculto)`);
+    if (!claveAProbar) continue;
+    const match = await bcrypt.compare(claveAProbar, u.password_hash || '');
+    console.log(`    ↳ ¿coincide con CLAVE_A_PROBAR? ${match ? "SÍ" : "NO"}`);
   }
 }
 

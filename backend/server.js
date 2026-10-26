@@ -1,7 +1,11 @@
 require('dotenv').config();
 
-// Desactivar temporalmente la verificación estricta de SSL en Node para entornos locales con certificados auto-firmados / proxys
-if (process.env.NODE_ENV !== 'production') {
+// Producción = NODE_ENV=production o Render (Render define RENDER aunque NODE_ENV no esté puesto).
+const esProduccion = process.env.NODE_ENV === 'production' || !!process.env.RENDER;
+
+// Desactivar temporalmente la verificación estricta de SSL en Node para entornos locales con certificados auto-firmados / proxys.
+// Nunca en producción: la verificación del login con Google descarga certificados por HTTPS.
+if (!esProduccion) {
   process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 }
 
@@ -13,6 +17,7 @@ const crypto = require('crypto');
 const nodemailer = require('nodemailer');
 const bcrypt = require('bcryptjs'); // Usamos bcryptjs para mejor compatibilidad en Windows
 const jwt = require('jsonwebtoken');
+const { OAuth2Client } = require('google-auth-library');
 const { createClient } = require('@supabase/supabase-js');
 const { handleChatbotRequest } = require('./chatbot');
 
@@ -26,8 +31,6 @@ const {
 const supabaseUrl = process.env.SUPABASE_URL;
 // Priorizar SUPABASE_SERVICE_ROLE_KEY para realizar operaciones administrativas de backend sin restricciones de RLS
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY;
-
-const JWT_SECRET = process.env.JWT_SECRET || 'supergelatto_secret_jwt_key_2026_default';
 
 // ─── AWS Rekognition Config ─────────────────────────────────────
 const rekognitionRegion = process.env.AWS_REGION || 'us-east-2';
@@ -353,7 +356,7 @@ const FALLBACK_PRODUCTS = [
 const mockDb = {
   producto: FALLBACK_PRODUCTS,
   usuario: [
-    { id_usuario: 1, nombre: 'Admin', apellido: 'SuperGelatto', email: 'saldarriagac890@gmail.com', password_hash: '$2a$10$GamiM2h7IwlRhosL5hQD0.OSBb2rdwSXVmkfpQS1rNOTkC2.Cw3zK', rol: 'admin' },
+    { id_usuario: 1, nombre: 'Admin', apellido: 'SuperGelatto', email: 'admin.principal@supergelatto.com', password_hash: '$2a$10$GamiM2h7IwlRhosL5hQD0.OSBb2rdwSXVmkfpQS1rNOTkC2.Cw3zK', rol: 'admin' },
     { id_usuario: 2, nombre: 'Admin', apellido: 'Secundario', email: 'admin@supergelatto.com', password_hash: '$2a$10$GamiM2h7IwlRhosL5hQD0.OSBb2rdwSXVmkfpQS1rNOTkC2.Cw3zK', rol: 'admin' },
     { id_usuario: 3, nombre: 'Cliente', apellido: 'Prueba', email: 'cliente@supergelatto.com', password_hash: '$2a$10$.2ki7UXxL2rjAX8VqUIIEewGFKxfLiGpqLeXZLX6oN7elDoMDQJU6', rol: 'cliente' }
   ],
@@ -495,6 +498,28 @@ if (!supabase && (process.env.NODE_ENV === 'production' || process.env.RENDER)) 
   throw new Error('Configuración incompleta: faltan SUPABASE_URL y/o SUPABASE_SERVICE_ROLE_KEY (o SUPABASE_KEY). En producción el servidor no arranca sin base de datos, para no aprobar pagos que no se guardan.');
 }
 
+// ─── Secreto de las sesiones (JWT) ──────────────────────────
+// Un único secreto: JWT_SECRET. En producción es obligatorio (32+ caracteres); fuera de producción,
+// si falta, se genera uno aleatorio al arrancar (las sesiones se pierden al reiniciar). Nunca uno fijo.
+const JWT_LONGITUD_MINIMA = 32;
+const JWT_ALGORITMO = 'HS256';
+const JWT_SECRET = (() => {
+  const secreto = (process.env.JWT_SECRET || '').trim();
+  if (secreto.length >= JWT_LONGITUD_MINIMA) return secreto;
+  if (esProduccion) {
+    throw new Error(`Configuración incompleta: falta JWT_SECRET o mide menos de ${JWT_LONGITUD_MINIMA} caracteres. En producción el servidor no arranca sin un secreto de sesiones seguro.`);
+  }
+  console.warn('⚠️ JWT_SECRET ausente o corto: se usa un secreto aleatorio temporal (solo desarrollo).');
+  return crypto.randomBytes(48).toString('hex');
+})();
+
+// ─── Google Sign-In ─────────────────────────────────────────
+const GOOGLE_CLIENT_ID = (process.env.GOOGLE_CLIENT_ID || '').trim();
+const googleOAuthClient = GOOGLE_CLIENT_ID ? new OAuth2Client(GOOGLE_CLIENT_ID) : null;
+if (!GOOGLE_CLIENT_ID && esProduccion) {
+  console.warn('⚠️ Falta GOOGLE_CLIENT_ID: el inicio de sesión con Google responderá 503 hasta configurarlo.');
+}
+
 if (!supabase) {
   console.warn('⚠️ Advertencia: Usando base de datos en memoria (Mock Supabase) debido a la falta de configuración válida.');
   // Versión simulada de la función registrar_venta de la base: misma forma de respuesta
@@ -567,8 +592,26 @@ app.use(cors({
   },
   credentials: true
 }));
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ limit: '50mb', extended: true }));
+// Tamaño máximo del cuerpo: 1 MB para todo (antes 50 MB: cualquiera podía mandar cuerpos enormes y
+// gastar memoria del servidor). Solo las rutas que reciben fotos en base64 (Face ID y crear producto)
+// aceptan hasta 8 MB; esas no pasan por el lector global sino por cuerpoGrande, que se pone en la ruta
+// DESPUÉS de comprobar la sesión de admin o el límite de intentos.
+const LIMITE_CUERPO = '1mb';
+const LIMITE_CUERPO_GRANDE = '8mb';
+const RUTAS_CUERPO_GRANDE = new Set([
+  '/api/admin/products',
+  '/api/admin/faceid/rekognition-login',
+  '/api/admin/faceid/rekognition-register',
+]);
+const leerJson = express.json({ limit: LIMITE_CUERPO });
+const leerFormulario = express.urlencoded({ limit: LIMITE_CUERPO, extended: true });
+const cuerpoGrande = [
+  express.json({ limit: LIMITE_CUERPO_GRANDE }),
+  express.urlencoded({ limit: LIMITE_CUERPO_GRANDE, extended: true }),
+];
+const esRutaCuerpoGrande = (req) => req.method === 'POST' && RUTAS_CUERPO_GRANDE.has(req.path);
+app.use((req, res, next) => (esRutaCuerpoGrande(req) ? next() : leerJson(req, res, next)));
+app.use((req, res, next) => (esRutaCuerpoGrande(req) ? next() : leerFormulario(req, res, next)));
 
 app.use((req, res, next) => {
   res.setHeader('Cross-Origin-Opener-Policy', 'same-origin-allow-popups');
@@ -743,39 +786,54 @@ function hasForbiddenChars(str) {
   return /[<>&"'\/]/.test(str);
 }
 
-const SUPER_ADMIN_EMAIL = 'muneracristian63@gmail.com';
-const ADMIN_EMAILS = [
-  'muneracristian63@gmail.com',
-  'saldarriagac890@gmail.com',
-  'cristianmunera427@gmail.com',
-  'miguelvilla00@gmail.com',
-  'emiliofunes28@gmail.com'
-];
+// Correos de administradores: vienen de variables de entorno (nunca escritos en el código).
+//  - ADMIN_EMAILS: lista separada por comas. Al iniciar sesión con Google (correo verificado por Google)
+//    estos correos entran como admin.
+//  - SUPER_ADMIN_EMAIL: la cuenta principal (protegida; la única que puede eliminar o bajar admins).
+function listaCorreos(valor) {
+  return String(valor || '').split(',').map((e) => e.trim().toLowerCase()).filter(Boolean);
+}
+const SUPER_ADMIN_EMAIL = listaCorreos(process.env.SUPER_ADMIN_EMAIL)[0] || '';
+const ADMIN_EMAILS = [...new Set([...listaCorreos(process.env.ADMIN_EMAILS), ...(SUPER_ADMIN_EMAIL ? [SUPER_ADMIN_EMAIL] : [])])];
 
-function verifyTokenSafely(token) {
-  const secrets = [
-    JWT_SECRET,
-    '2d6dd55ad0b69fa0ef25d9810d7bd76767806c2b463e81a5cb7509623657410c71257bf53cac6fb4326491ebff83eecc',
-    'supergelatto_secret_jwt_key_2026_default'
-  ].filter(Boolean);
-
-  for (const secret of secrets) {
-    try {
-      const decoded = jwt.verify(token, secret);
-      if (decoded) return decoded;
-    } catch (e) {}
-  }
-  return null;
+// Si SUPER_ADMIN_EMAIL no está configurado, nadie es super admin (un correo vacío nunca coincide).
+function esSuperAdminEmail(email) {
+  const limpio = String(email || '').trim().toLowerCase();
+  return !!SUPER_ADMIN_EMAIL && limpio === SUPER_ADMIN_EMAIL;
 }
 
-// Middleware seguro para validar que la petición incluye un JWT válido de Administrador
-function requireAuthenticatedAdmin(req, res, next) {
-  // Soporte para entorno de pruebas de integración y simulación
-  if ((process.env.NODE_ENV === 'test' || process.env.SIMULATION_MODE === 'true') && req.headers['x-user-role'] === 'admin') {
-    req.user = { id_usuario: parseInt(req.headers['x-user-id'], 10) || 1, rol: 'admin' };
-    return next();
-  }
+// Correos reservados (super admin y ADMIN_EMAILS): nadie puede registrarlos ni quedárselos.
+function esCorreoReservado(email) {
+  return esSuperAdminEmail(email) || ADMIN_EMAILS.includes(String(email || '').trim().toLowerCase());
+}
 
+// Rol con el que se firma la sesión: el de la base, salvo correos de ADMIN_EMAILS VERIFICADOS (Google).
+function rolConCorreoVerificado(usuario, emailVerificado) {
+  return ADMIN_EMAILS.includes(String(emailVerificado || '').trim().toLowerCase()) ? 'admin' : usuario.rol;
+}
+
+// Único lugar donde se firman sesiones: solo HS256, vencen en 24 h.
+function firmarToken(usuario, rol = usuario.rol) {
+  return jwt.sign(
+    { id_usuario: usuario.id_usuario, email: usuario.email, rol },
+    JWT_SECRET,
+    { algorithm: JWT_ALGORITMO, expiresIn: '24h' }
+  );
+}
+
+// Verifica con el único secreto y solo HS256. Devuelve el contenido del token o null.
+function verifyTokenSafely(token) {
+  if (typeof token !== 'string' || !token) return null;
+  try {
+    return jwt.verify(token, JWT_SECRET, { algorithms: [JWT_ALGORITMO] });
+  } catch (e) {
+    return null;
+  }
+}
+
+// Middleware seguro para validar que la petición incluye un JWT válido de Administrador.
+// El permiso sale SOLO del rol firmado en el token (ni cabeceras como x-user-role ni el correo).
+function requireAuthenticatedAdmin(req, res, next) {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.startsWith('Bearer ') ? authHeader.split(' ')[1] : req.headers['x-user-token'];
 
@@ -788,8 +846,7 @@ function requireAuthenticatedAdmin(req, res, next) {
     return res.status(401).json({ message: 'Token de sesión inválido o expirado. Por favor inicia sesión nuevamente.' });
   }
 
-  const email = (decoded?.email || '').toLowerCase().trim();
-  const isAuthorizedAdmin = decoded?.rol === 'admin' || decoded?.rol === 'super_admin' || ADMIN_EMAILS.includes(email);
+  const isAuthorizedAdmin = decoded?.rol === 'admin' || decoded?.rol === 'super_admin';
 
   if (!isAuthorizedAdmin) {
     return res.status(403).json({ message: 'Acceso denegado. Se requieren permisos de administrador.' });
@@ -804,6 +861,42 @@ function requireAuthenticatedAdmin(req, res, next) {
 
 // Alias para mantener compatibilidad con rutas existentes
 const requireAdmin = requireAuthenticatedAdmin;
+
+// Middleware para rutas que necesitan una sesión cualquiera (cliente o admin): solo Authorization: Bearer
+// verificado con verifyTokenSafely. Deja el contenido del token en req.user.
+function requireAuth(req, res, next) {
+  const authHeader = req.headers['authorization'] || '';
+  const sesion = authHeader.startsWith('Bearer ') ? verifyTokenSafely(authHeader.slice(7)) : null;
+  if (!sesion) {
+    return res.status(401).json({ ok: false, message: 'Debes iniciar sesión. Tu sesión no es válida o expiró.' });
+  }
+  req.user = sesion;
+  next();
+}
+
+const esSesionAdmin = (sesion) => sesion?.rol === 'admin' || sesion?.rol === 'super_admin';
+
+// Límite de intentos en las rutas de cuenta (login, google-login, register, forgot-password y
+// rekognition-login), contra bots que prueban contraseñas o crean cuentas en masa. Cada ruta lleva su
+// propia cuenta por IP. Configurable por entorno: LOGIN_RATE_LIMIT_MAX (intentos por ventana, 10 por
+// defecto) y LOGIN_RATE_LIMIT_WINDOW_MS (15 minutos por defecto).
+const VENTANA_LOGIN_MS = Number(process.env.LOGIN_RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000;
+function crearLimitadorCuenta() {
+  return rateLimit({
+    windowMs: VENTANA_LOGIN_MS,
+    limit: Number(process.env.LOGIN_RATE_LIMIT_MAX) || 10,
+    standardHeaders: true,
+    legacyHeaders: false,
+    handler: (req, res) =>
+      res.status(429).json({ ok: false, message: `Demasiados intentos. Espera ${Math.ceil(VENTANA_LOGIN_MS / 60000)} minuto(s) e inténtalo de nuevo.` })
+  });
+}
+const limitadorLogin = crearLimitadorCuenta();
+const limitadorGoogleLogin = crearLimitadorCuenta();
+const limitadorRegistro = crearLimitadorCuenta();
+const limitadorOlvidoClave = crearLimitadorCuenta();
+const limitadorLoginFacial = crearLimitadorCuenta();
+const limitadorCrearAdmin = crearLimitadorCuenta();
 
 // Helper para asignar imágenes reales basadas en el nombre
 function getProductImage(name) {
@@ -966,7 +1059,7 @@ function getFlavorData(name) {
 }
 
 // ─── Register (CON BCRYPT) ──────────────────────────────────
-app.post('/api/register', async (req, res) => {
+app.post('/api/register', limitadorRegistro, async (req, res) => {
   let { name, lastName, email, password, confirmPassword } = req.body;
 
   if (hasForbiddenChars(name) || hasForbiddenChars(lastName) || hasForbiddenChars(email)) {
@@ -1016,6 +1109,11 @@ app.post('/api/register', async (req, res) => {
     return res.status(400).json({ message: 'La contraseña debe tener 8 caracteres, una mayúscula, una minúscula, un número y un carácter especial.' });
   }
 
+  // Correos de administradores: solo entran con Google verificado (mensaje genérico, no revela cuáles son).
+  if (esCorreoReservado(email)) {
+    return res.status(403).json({ ok: false, message: 'No se puede registrar con ese correo.' });
+  }
+
   // Verificar si el usuario ya existe
   const { data: existingUser } = await supabase.from('usuario').select('email').eq('email', email).maybeSingle();
   if (existingUser) return res.status(409).json({ message: 'El email ya está registrado.' });
@@ -1039,7 +1137,7 @@ app.post('/api/register', async (req, res) => {
 });
 
 // ─── Login (CON BCRYPT) ─────────────────────────────────────
-app.post('/api/login', async (req, res) => {
+app.post('/api/login', limitadorLogin, async (req, res) => {
   const { email, password } = req.body;
 
   if (!email || !password) return res.status(400).json({ message: 'Campos obligatorios.' });
@@ -1077,12 +1175,9 @@ app.post('/api/login', async (req, res) => {
     }
   }
 
-  // GENERAR TOKEN JWT FIRMADO
-  const token = jwt.sign(
-    { id_usuario: user.id_usuario, email: user.email, rol: user.rol },
-    JWT_SECRET,
-    { expiresIn: '24h' }
-  );
+  // GENERAR TOKEN JWT FIRMADO (rol de la base: el registro con contraseña no verifica el correo,
+  // así que aquí ADMIN_EMAILS no da permisos)
+  const token = firmarToken(user);
 
   return res.status(200).json({
     ok: true,
@@ -1095,7 +1190,7 @@ app.post('/api/login', async (req, res) => {
 // ─── AWS Rekognition (Reconocimiento Facial Admin) ─────────────────
 
 // 1. Registro Facial con AWS Rekognition (Protegido Admin)
-app.post('/api/admin/faceid/rekognition-register', requireAuthenticatedAdmin, async (req, res) => {
+app.post('/api/admin/faceid/rekognition-register', requireAuthenticatedAdmin, cuerpoGrande, async (req, res) => {
   try {
     const { image } = req.body;
     const userId = req.user.id_usuario;
@@ -1159,7 +1254,7 @@ app.post('/api/admin/faceid/rekognition-register', requireAuthenticatedAdmin, as
 });
 
 // 2. Login Facial con AWS Rekognition (Público)
-app.post('/api/admin/faceid/rekognition-login', async (req, res) => {
+app.post('/api/admin/faceid/rekognition-login', limitadorLoginFacial, cuerpoGrande, async (req, res) => {
   const genericError = { ok: false, message: 'Reconocimiento facial no reconocido o acceso denegado.' };
   try {
     const { image } = req.body;
@@ -1220,11 +1315,7 @@ app.post('/api/admin/faceid/rekognition-login', async (req, res) => {
       return res.status(401).json(genericError);
     }
 
-    const token = jwt.sign(
-      { id_usuario: user.id_usuario, email: user.email, rol: user.rol },
-      JWT_SECRET,
-      { expiresIn: '24h' }
-    );
+    const token = firmarToken(user);
 
     return res.status(200).json({
       ok: true,
@@ -1266,119 +1357,113 @@ app.post('/api/admin/faceid/rekognition-login', async (req, res) => {
 
 
 // ─── Google Login ───────────────────────────────────────────
-app.post('/api/google-login', async (req, res) => {
-  const { email, name } = req.body;
+// El navegador manda el `credential` (ID token firmado por Google). Se verifica aquí con la librería
+// oficial; correo y nombre salen SOLO del token verificado (se ignora cualquier email/name/rol del cuerpo).
+const GOOGLE_CREDENTIAL_MAX = 8192;
+const COLUMNAS_SESION = 'id_usuario, nombre, email, rol';
 
-  if (!email || typeof email !== 'string') {
-    return res.status(400).json({ message: 'Email es obligatorio.' });
+async function verificarCredencialGoogle(credential) {
+  try {
+    const ticket = await googleOAuthClient.verifyIdToken({ idToken: credential, audience: GOOGLE_CLIENT_ID });
+    const payload = ticket.getPayload() || {};
+    const email = typeof payload.email === 'string' ? payload.email.trim().toLowerCase() : '';
+    if (!email || payload.email_verified !== true) return null;
+    return { email, nombre: String(payload.name || payload.given_name || email.split('@')[0]).trim().slice(0, 100) };
+  } catch (e) {
+    return null;
+  }
+}
+
+// Busca el usuario por correo exacto (sin distinguir mayúsculas). Se escapan los comodines de ilike
+// (% y _) y se confirma la coincidencia exacta, para que un correo no "encaje" con la cuenta de otro.
+async function buscarUsuarioPorEmail(email) {
+  const patron = email.replace(/[\\%_]/g, (c) => '\\' + c);
+  const { data, error } = await supabase.from('usuario').select(COLUMNAS_SESION).ilike('email', patron).maybeSingle();
+  if (error) return { error };
+  const usuario = data && String(data.email || '').trim().toLowerCase() === email ? data : null;
+  return { usuario };
+}
+
+function respuestaSesionGoogle(res, usuario, emailVerificado, mensaje) {
+  const rol = rolConCorreoVerificado(usuario, emailVerificado);
+  return res.status(200).json({
+    ok: true,
+    message: mensaje,
+    token: firmarToken(usuario, rol),
+    user: { id: usuario.id_usuario, id_usuario: usuario.id_usuario, name: usuario.nombre, email: usuario.email, rol }
+  });
+}
+
+app.post('/api/google-login', limitadorGoogleLogin, async (req, res) => {
+  if (!googleOAuthClient) {
+    return res.status(503).json({ ok: false, message: 'El inicio de sesión con Google no está disponible en este momento.' });
   }
 
-  const cleanEmail = email.trim();
+  const { credential } = req.body || {};
+  if (typeof credential !== 'string' || !credential || credential.length > GOOGLE_CREDENTIAL_MAX) {
+    return res.status(401).json({ ok: false, message: 'No se pudo verificar tu cuenta de Google.' });
+  }
 
+  const google = await verificarCredencialGoogle(credential);
+  if (!google) {
+    return res.status(401).json({ ok: false, message: 'No se pudo verificar tu cuenta de Google.' });
+  }
+
+  const errorGoogle = 'Error al vincular cuenta de Google.';
   try {
-    // 1. Buscar si el usuario ya existe (búsqueda insensible a mayúsculas/minúsculas)
-    let user = null;
-    const { data: userIlike, error: searchErr } = await supabase
-      .from('usuario')
-      .select('*')
-      .ilike('email', cleanEmail)
-      .maybeSingle();
-
-    user = userIlike;
-
-    if (!user) {
-      const { data: userEq } = await supabase
-        .from('usuario')
-        .select('*')
-        .eq('email', cleanEmail)
-        .maybeSingle();
-      user = userEq;
+    // 1. ¿Ya existe?
+    const busqueda = await buscarUsuarioPorEmail(google.email);
+    if (falloSupabase(res, busqueda.error, errorGoogle)) return;
+    if (busqueda.usuario) {
+      // Cuenta con correo de admin que en la base es cliente (se creó con contraseña o con Google): al
+      // elevarla se reemplaza su contraseña por una aleatoria, para que solo se pueda entrar con Google.
+      if (busqueda.usuario.rol !== 'admin' && rolConCorreoVerificado(busqueda.usuario, google.email) === 'admin') {
+        const hashAleatorio = await bcrypt.hash(crypto.randomBytes(32).toString('hex'), saltRounds);
+        const { error: errorClave } = await supabase
+          .from('usuario').update({ password_hash: hashAleatorio }).eq('id_usuario', busqueda.usuario.id_usuario);
+        if (falloSupabase(res, errorClave, errorGoogle)) return;
+      }
+      return respuestaSesionGoogle(res, busqueda.usuario, google.email, 'Inicio de sesión con Google exitoso.');
     }
 
-    if (user) {
-      const userRole = ADMIN_EMAILS.includes(cleanEmail.toLowerCase()) ? 'admin' : user.rol;
-      // Generar token JWT firmado
-      const token = jwt.sign(
-        { id_usuario: user.id_usuario, email: user.email, rol: userRole },
-        JWT_SECRET,
-        { expiresIn: '24h' }
-      );
-
-      return res.status(200).json({
-        ok: true,
-        message: 'Inicio de sesión con Google exitoso.',
-        token,
-        user: { id: user.id_usuario, id_usuario: user.id_usuario, name: user.nombre, email: user.email, rol: userRole }
-      });
-    }
-
-    // 2. Si no existe, lo registramos automáticamente
+    // 2. Si no existe, se registra como cliente (con una contraseña aleatoria que nadie conoce).
     const randomPassword = "Gg1!" + crypto.randomBytes(12).toString('hex') + "@#";
     const hashedPassword = await bcrypt.hash(randomPassword, saltRounds);
-    const userName = name || cleanEmail.split('@')[0];
 
     const { data: newUser, error: registerError } = await supabase
       .from('usuario')
-      .insert([{ nombre: userName, apellido: '', email: cleanEmail.toLowerCase(), password_hash: hashedPassword, rol: 'cliente' }])
-      .select().maybeSingle();
+      .insert([{ nombre: google.nombre, apellido: '', email: google.email, password_hash: hashedPassword, rol: 'cliente' }])
+      .select(COLUMNAS_SESION).maybeSingle();
 
     if (registerError) {
-      // Si el error es por duplicado (ya registrado), buscar el usuario existente y loguear
-      if (registerError.code === '23505' || registerError.message?.includes('duplicate') || registerError.message?.includes('unique')) {
-        const { data: existingUser } = await supabase
-          .from('usuario')
-          .select('*')
-          .ilike('email', cleanEmail)
-          .maybeSingle();
-
-        if (existingUser) {
-          const token = jwt.sign(
-            { id_usuario: existingUser.id_usuario, email: existingUser.email, rol: existingUser.rol },
-            JWT_SECRET,
-            { expiresIn: '24h' }
-          );
-
-          return res.status(200).json({
-            ok: true,
-            message: 'Inicio de sesión con Google exitoso.',
-            token,
-            user: { id: existingUser.id_usuario, id_usuario: existingUser.id_usuario, name: existingUser.nombre, email: existingUser.email, rol: existingUser.rol }
-          });
-        }
-      }
-      throw registerError;
+      // Duplicado (se registró a la vez por otra petición): se busca de nuevo y se inicia sesión.
+      const duplicado = registerError.code === '23505' || registerError.message?.includes('duplicate') || registerError.message?.includes('unique');
+      if (!duplicado) return falloSupabase(res, registerError, errorGoogle);
+      const otra = await buscarUsuarioPorEmail(google.email);
+      if (falloSupabase(res, otra.error, errorGoogle)) return;
+      if (!otra.usuario) return res.status(500).json({ ok: false, message: errorGoogle });
+      return respuestaSesionGoogle(res, otra.usuario, google.email, 'Inicio de sesión con Google exitoso.');
     }
 
-    const createdUser = newUser || (await supabase.from('usuario').select('*').eq('email', cleanEmail.toLowerCase()).maybeSingle()).data;
-
+    let createdUser = newUser;
     if (!createdUser) {
-      throw new Error('No se pudo recuperar los datos del nuevo usuario registrado.');
+      const creada = await buscarUsuarioPorEmail(google.email);
+      if (falloSupabase(res, creada.error, errorGoogle)) return;
+      createdUser = creada.usuario;
+    }
+    if (!createdUser) {
+      return res.status(500).json({ ok: false, message: errorGoogle });
     }
 
-    // Generar token JWT firmado
-    const token = jwt.sign(
-      { id_usuario: createdUser.id_usuario, email: createdUser.email, rol: createdUser.rol },
-      JWT_SECRET,
-      { expiresIn: '24h' }
-    );
-
-    return res.status(200).json({
-      ok: true,
-      message: 'Registro e inicio de sesión con Google exitoso.',
-      token,
-      user: { id: createdUser.id_usuario, id_usuario: createdUser.id_usuario, name: createdUser.nombre, email: createdUser.email, rol: createdUser.rol }
-    });
+    return respuestaSesionGoogle(res, createdUser, google.email, 'Registro e inicio de sesión con Google exitoso.');
   } catch (err) {
     console.error('❌ Error en Google Login:', err);
-    return res.status(500).json({
-      ok: false,
-      message: err.message ? `Error al vincular cuenta de Google: ${err.message}` : 'Error al vincular cuenta de Google.'
-    });
+    return res.status(500).json({ ok: false, message: errorGoogle });
   }
 });
 
 // ─── Forgot Password ───────────────────────────────────────
-app.post('/api/forgot-password', async (req, res) => {
+app.post('/api/forgot-password', limitadorOlvidoClave, async (req, res) => {
   const { email } = req.body;
 
   if (!email) return res.status(400).json({ message: 'Email es obligatorio.' });
@@ -1476,56 +1561,74 @@ app.post('/api/reset-password/:token', async (req, res) => {
   }
 });
 
-// ─── Orders (using 'venta' table for sales with real-time fallback merge) ────────────────
-app.get('/api/orders/:userId', async (req, res) => {
-  const { userId } = req.params;
-  try {
-    let dbOrders = [];
-    const { data: supaOrders, error } = await supabase
-      .from('venta')
-      .select('*')
-      .eq('id_usuario', userId)
-      .order('fecha', { ascending: false });
+// ─── Pedidos del usuario ──────────────────────────────────────
+// Solo con sesión: el dueño o un administrador. Lee SOLO de la base (la tabla venta), con columnas
+// concretas y paginado: ?limit= (máximo 50) y ?offset=. Si la base falla -> 500, nunca una lista vacía.
+const MAX_PEDIDOS_POR_PAGINA = 50;
 
-    if (supaOrders) {
-      dbOrders = supaOrders;
-    } else if (error) {
-      console.warn('Advertencia obteniendo pedidos de Supabase:', error.message);
-    }
+// Entero >= 0 de la URL; si no viene, el valor por defecto; si es inválido, NaN.
+function enteroDeConsulta(valor, porDefecto) {
+  if (valor === undefined) return porDefecto;
+  return /^\d+$/.test(String(valor)) ? Number(valor) : NaN;
+}
 
-    // Mergear con FALLBACK_SALES en tiempo real para este usuario
-    const ordersMap = new Map();
-    dbOrders.forEach(o => ordersMap.set(String(o.id_venta), o));
-
-    FALLBACK_SALES.forEach(f => {
-      if (String(f.id_usuario) === String(userId)) {
-        if (!ordersMap.has(String(f.id_venta))) {
-          ordersMap.set(String(f.id_venta), f);
-        } else {
-          // Si el admin actualizó el estado en FALLBACK_SALES, usar el estado más reciente
-          const existing = ordersMap.get(String(f.id_venta));
-          existing.estado = f.estado || existing.estado;
-        }
-      }
-    });
-
-    const combinedOrders = Array.from(ordersMap.values()).sort(
-      (a, b) => new Date(b.fecha) - new Date(a.fecha)
-    );
-
-    return res.status(200).json(combinedOrders);
-  } catch (err) {
-    console.error('Error al obtener pedidos:', err);
-    return res.status(500).json({ message: 'Error al obtener pedidos.' });
+app.get('/api/orders/:userId', requireAuth, async (req, res) => {
+  if (!/^\d+$/.test(String(req.params.userId))) {
+    return res.status(400).json({ ok: false, message: 'Identificador de usuario no válido.' });
   }
+  const userId = Number(req.params.userId);
+  if (String(req.user.id_usuario) !== String(userId) && !esSesionAdmin(req.user)) {
+    return res.status(403).json({ ok: false, message: 'No puedes ver los pedidos de otra persona.' });
+  }
+
+  const limite = enteroDeConsulta(req.query.limit, MAX_PEDIDOS_POR_PAGINA);
+  const desde = enteroDeConsulta(req.query.offset, 0);
+  if (!Number.isSafeInteger(limite) || limite < 1 || !Number.isSafeInteger(desde)) {
+    return res.status(400).json({ ok: false, message: 'Paginación no válida.' });
+  }
+  const porPagina = Math.min(limite, MAX_PEDIDOS_POR_PAGINA);
+
+  const { data, error } = await supabase
+    .from('venta')
+    .select('id_venta, fecha, total, estado')
+    .eq('id_usuario', userId)
+    .order('fecha', { ascending: false })
+    .range(desde, desde + porPagina - 1);
+  if (falloSupabase(res, error, 'Error al obtener pedidos.')) return;
+  return res.status(200).json(data || []);
 });
 
-
-
 // ─── Update User Profile ─────────────────────────────────────
-app.put('/api/users/:id', async (req, res) => {
-  const { id } = req.params;
-  let { name, email, picture, avatar } = req.body;
+// Solo con sesión: el propio usuario o un administrador. Solo se cambian nombre y correo (lista blanca):
+// rol, contraseña, id o cualquier otro campo del cuerpo se ignoran. Un admin normal edita clientes y a sí
+// mismo; a los demás administradores (y al super admin) solo los modifica el super admin
+// (SUPER_ADMIN_EMAIL). Los correos de administradores (ADMIN_EMAILS) están reservados.
+const MAX_LARGO_NOMBRE = 100;
+const MAX_LARGO_EMAIL = 254;
+
+const mismoCorreo = (a, b) => String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
+
+app.put('/api/users/:id', requireAuth, async (req, res) => {
+  if (!/^\d+$/.test(String(req.params.id))) {
+    return res.status(400).json({ ok: false, message: 'Identificador de usuario no válido.' });
+  }
+  const id = Number(req.params.id);
+  const sesion = req.user;
+  const esPropio = String(sesion.id_usuario) === String(id);
+  const sesionEsSuper = esSuperAdminEmail(sesion.email);
+  if (!esPropio && !esSesionAdmin(sesion)) {
+    return res.status(403).json({ ok: false, message: 'No puedes modificar la cuenta de otra persona.' });
+  }
+
+  let { name, email } = req.body || {};
+  const { picture, avatar } = req.body || {};
+
+  if (typeof name !== 'string' || typeof email !== 'string' || !name || !email) {
+    return res.status(400).json({ ok: false, message: 'Nombre y email son obligatorios.' });
+  }
+  if (name.length > MAX_LARGO_NOMBRE || email.length > MAX_LARGO_EMAIL) {
+    return res.status(400).json({ ok: false, message: 'El nombre o el correo son demasiado largos.' });
+  }
 
   if (hasForbiddenChars(name) || hasForbiddenChars(email)) {
     return res.status(400).json({ message: 'No se permiten caracteres especiales peligrosos (< > & " \' /).' });
@@ -1555,36 +1658,64 @@ app.put('/api/users/:id', async (req, res) => {
     return res.status(400).json({ message: 'Solo se permite un espacio sencillo entre palabras.' });
   }
 
-  const userAvatar = picture || avatar || null;
+  // La foto no se guarda en la base: solo se devuelve si es un texto corto (como antes).
+  const foto = [picture, avatar].find((p) => typeof p === 'string' && p.length <= 2048) || null;
 
   try {
-    const updatePayload = { nombre: name, email: email };
-
-    const { data: updatedUser, error } = await supabase
+    // 2. La cuenta a modificar y los permisos sobre ella.
+    const { data: destino, error: errorDestino } = await supabase
       .from('usuario')
-      .update(updatePayload)
+      .select('id_usuario, email, rol')
       .eq('id_usuario', id)
-      .select().single();
+      .maybeSingle();
+    if (falloSupabase(res, errorDestino, 'Error al actualizar el perfil.')) return;
+    if (!destino) return res.status(404).json({ ok: false, message: 'Usuario no encontrado.' });
 
-    if (error) {
-      if (error.code === '23505') return res.status(409).json({ message: 'El email ya está en uso.' });
-      console.warn('Advertencia en Supabase al actualizar usuario:', error.message);
+    const destinoEsAdmin = esSesionAdmin(destino) || esSuperAdminEmail(destino.email);
+    if (!esPropio && destinoEsAdmin && !sesionEsSuper) {
+      return res.status(403).json({ ok: false, message: 'Solo el administrador principal puede modificar a otros administradores.' });
     }
 
-    const finalUser = {
-      id: updatedUser ? updatedUser.id_usuario : id,
-      name: updatedUser ? updatedUser.nombre : name,
-      email: updatedUser ? updatedUser.email : email,
-      picture: userAvatar || (updatedUser ? updatedUser.picture : null),
-    };
+    // 3. Correos reservados (super admin y ADMIN_EMAILS): nadie más puede quedárselos, aunque aún no
+    //    tengan cuenta. Conservar el correo que ya se tiene sí se permite.
+    if (esCorreoReservado(email) && !mismoCorreo(email, destino.email) && !sesionEsSuper) {
+      return res.status(403).json({ ok: false, message: 'Ese correo está reservado y no se puede usar.' });
+    }
+
+    // 4. Correo ya usado por otra cuenta (sin distinguir mayúsculas; se escapan los comodines de ilike).
+    if (!mismoCorreo(email, destino.email)) {
+      const patron = email.toLowerCase().replace(/[\\%_]/g, (c) => '\\' + c);
+      const { data: otros, error: errorDuplicado } = await supabase
+        .from('usuario')
+        .select('id_usuario, email')
+        .ilike('email', patron)
+        .neq('id_usuario', id)
+        .limit(5);
+      if (falloSupabase(res, errorDuplicado, 'Error al actualizar el perfil.')) return;
+      if ((otros || []).some((u) => mismoCorreo(u.email, email))) {
+        return res.status(409).json({ ok: false, message: 'El email ya está en uso.' });
+      }
+    }
+
+    // 5. Guardar solo nombre y correo.
+    const { data: actualizado, error } = await supabase
+      .from('usuario')
+      .update({ nombre: name, email })
+      .eq('id_usuario', id)
+      .select('id_usuario, nombre, email')
+      .single();
+    if (error?.code === '23505') return res.status(409).json({ ok: false, message: 'El email ya está en uso.' });
+    if (falloSupabase(res, error, 'Error al actualizar el perfil.')) return;
+    if (!actualizado) return res.status(404).json({ ok: false, message: 'Usuario no encontrado.' });
 
     return res.status(200).json({
+      ok: true,
       message: 'Perfil actualizado correctamente.',
-      user: finalUser
+      user: { id: actualizado.id_usuario, name: actualizado.nombre, email: actualizado.email, picture: foto }
     });
   } catch (error) {
     console.error('Error updating profile:', error);
-    return res.status(500).json({ message: 'Error al actualizar el perfil.' });
+    return res.status(500).json({ ok: false, message: 'Error al actualizar el perfil.' });
   }
 });
 
@@ -1690,7 +1821,9 @@ app.get('/api/admin/dashboard', requireAdmin, async (req, res) => {
         activeUsers,
         totalSales: sales.length
       },
-      users,
+      // El panel decide qué botones mostrar con estas marcas (el correo del super admin no viaja al navegador).
+      soySuperAdmin: esSuperAdminEmail(req.user?.email),
+      users: users.map((u) => ({ ...u, es_super_admin: esSuperAdminEmail(u.email) || u.rol === 'super_admin' })),
       sales,
       products
     });
@@ -1719,7 +1852,7 @@ app.delete('/api/admin/users/:id', requireAdmin, async (req, res) => {
     }
 
     const targetEmail = (targetUser.email || '').toLowerCase().trim();
-    const isTargetSuperAdmin = targetEmail === SUPER_ADMIN_EMAIL || targetUser.rol === 'super_admin';
+    const isTargetSuperAdmin = esSuperAdminEmail(targetEmail) || targetUser.rol === 'super_admin';
 
     // No se permite eliminar la cuenta principal de super administrador
     if (isTargetSuperAdmin) {
@@ -1730,7 +1863,7 @@ app.delete('/api/admin/users/:id', requireAdmin, async (req, res) => {
     // - Super Admin: Puede eliminar tanto cuentas de administrador como de clientes.
     // - Admin normal: Solo puede eliminar cuentas de clientes, NO otros administradores.
     const isTargetAdmin = targetUser.rol === 'admin';
-    const isRequesterSuperAdmin = requesterEmail === SUPER_ADMIN_EMAIL;
+    const isRequesterSuperAdmin = esSuperAdminEmail(requesterEmail);
 
     if (isTargetAdmin && !isRequesterSuperAdmin) {
       return res.status(403).json({ 
@@ -1777,15 +1910,15 @@ app.put('/api/admin/users/:id/role', requireAdmin, async (req, res) => {
     }
 
     // No se puede modificar el rol de la cuenta principal de super administrador
-    if ((targetUser.email || '').toLowerCase() === SUPER_ADMIN_EMAIL) {
+    if (esSuperAdminEmail(targetUser.email)) {
       return res.status(403).json({ message: 'Acceso denegado. No se puede modificar el rol de la cuenta principal de super administrador.' });
     }
 
     // Si el usuario objetivo es administrador y se intenta bajar a cliente:
-    // Solo el super administrador (muneracristian63@gmail.com) puede realizar el cambio.
-    if (targetUser.rol === 'admin' && rol === 'cliente' && requesterEmail !== SUPER_ADMIN_EMAIL) {
+    // Solo el super administrador (SUPER_ADMIN_EMAIL) puede realizar el cambio.
+    if (targetUser.rol === 'admin' && rol === 'cliente' && !esSuperAdminEmail(requesterEmail)) {
       return res.status(403).json({ 
-        message: 'Acceso denegado. Solo la cuenta de super administrador principal (muneracristian63@gmail.com) puede bajar de categoría a los administradores a cliente.' 
+        message: 'Acceso denegado. Solo la cuenta de super administrador principal puede bajar de categoría a los administradores a cliente.' 
       });
     }
 
@@ -1887,154 +2020,61 @@ app.put('/api/admin/sales/:id/status', requireAdmin, async (req, res) => {
   }
 });
 
-// ─── CREACIÓN Y REGISTRO DE VENTAS EN TIEMPO REAL ─────────────────
-app.post('/api/orders', async (req, res) => {
-  const { userId, total, deliveryDetails, items } = req.body;
+// Las ventas se registran SOLO en /api/payments/process (función registrar_venta, precios de la base).
+// Las antiguas POST /api/orders y POST /api/sales se eliminaron: ninguna pantalla las usaba y guardaban
+// ventas sin sesión, con el total que mandaba el navegador.
 
-  const numTotal = Number(total);
-  if (isNaN(numTotal) || numTotal <= 0) {
-    return res.status(400).json({ message: 'El total del pedido debe ser un número mayor a 0.' });
+// Crear administradores: solo el super admin. Su propio correo (SUPER_ADMIN_EMAIL) nunca se puede crear aquí
+// (si no existiera aún, otro admin podría quedarse con esa cuenta); los de ADMIN_EMAILS sí, porque quien
+// crea es el super admin. Respuesta solo con columnas seguras.
+app.post('/api/admin/create-admin', requireAdmin, limitadorCrearAdmin, async (req, res) => {
+  if (!esSuperAdminEmail(req.user?.email)) {
+    return res.status(403).json({ ok: false, message: 'Solo el super administrador puede crear administradores.' });
+  }
+  const { name, lastName, email, password } = req.body || {};
+  const nombre = typeof name === 'string' ? name.trim() : '';
+  const apellido = lastName == null || lastName === '' ? '' : typeof lastName === 'string' ? lastName.trim() : null;
+  const correo = typeof email === 'string' ? email.trim().toLowerCase() : '';
+  if (nombre.length < 1 || nombre.length > 100 || apellido === null || apellido.length > 100) {
+    return res.status(400).json({ ok: false, message: 'El nombre y el apellido deben ser texto de hasta 100 caracteres.' });
+  }
+  if (!/^[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.(com|net|edu)$/i.test(correo)) {
+    return res.status(400).json({ ok: false, message: 'El correo debe ser un email válido (sin caracteres especiales) terminado en .com, .net o .edu.' });
+  }
+  if (typeof password !== 'string' || password.length < 8 || password.length > 128) {
+    return res.status(400).json({ ok: false, message: 'La contraseña debe tener entre 8 y 128 caracteres.' });
+  }
+  if (esSuperAdminEmail(correo)) {
+    return res.status(403).json({ ok: false, message: 'No se puede crear una cuenta con ese correo.' });
   }
 
-  try {
-    const saleId = Date.now();
-    const nowIso = new Date().toISOString();
+  const { usuario: existente, error: errorBusqueda } = await buscarUsuarioPorEmail(correo);
+  if (falloSupabase(res, errorBusqueda, 'No se pudo crear el administrador. Inténtalo más tarde.')) return;
+  if (existente) return res.status(409).json({ ok: false, message: 'El email ya está registrado.' });
 
-    const newSaleItem = {
-      id_venta: saleId,
-      id_usuario: userId || null,
-      total: numTotal,
-      fecha: nowIso,
-      estado: 'En proceso',
-      email: deliveryDetails?.email || (req.user?.email || null),
-      nombre: deliveryDetails?.fullName || 'Cliente Realtime',
-      deliveryDetails: deliveryDetails || {},
-      items: items || []
-    };
+  const hashedPassword = await bcrypt.hash(password, saltRounds);
+  const { data: newUser, error } = await supabase
+    .from('usuario')
+    .insert([{ nombre, apellido, email: correo, password_hash: hashedPassword, rol: 'admin' }])
+    .select('id_usuario, nombre, apellido, email, rol')
+    .single();
+  if (error?.code === '23505') return res.status(409).json({ ok: false, message: 'El email ya está registrado.' });
+  if (falloSupabase(res, error, 'No se pudo crear el administrador. Inténtalo más tarde.')) return;
 
-    // 1. Guardar localmente para disponibilidad instantánea e infalible en tiempo real
-    FALLBACK_SALES.unshift(newSaleItem);
-    saveFallbackSales(FALLBACK_SALES);
-
-    // 2. Intentar guardar en Supabase con manejo seguro de esquema
-    try {
-      let validUserId = null;
-      if (userId) {
-        const { data: userCheck } = await supabase
-          .from('usuario')
-          .select('id_usuario')
-          .eq('id_usuario', userId)
-          .single();
-        if (userCheck) validUserId = userId;
-      }
-
-      const { error: insertErr } = await supabase.from('venta').insert([{
-        id_venta: saleId,
-        id_usuario: validUserId,
-        total: numTotal,
-        fecha: nowIso
-      }]);
-      
-      if (insertErr) {
-        console.warn('Advertencia Supabase al insertar venta:', insertErr.message);
-      }
-    } catch (supaErr) {
-      console.warn('Advertencia Supabase al insertar venta:', supaErr.message);
-    }
-
-    // 3. Descontar stock en tiempo real
-    if (Array.isArray(items)) {
-      items.forEach(item => {
-        const itemName = (item.name || item.nombre || '').toLowerCase().trim();
-        const qty = item.quantity || item.cantidad || 1;
-        const prod = FALLBACK_PRODUCTS.find(p => (p.nombre || '').toLowerCase().trim() === itemName || (p.name || '').toLowerCase().trim() === itemName);
-        if (prod) {
-          prod.stock = Math.max(0, (prod.stock !== undefined ? prod.stock : 50) - qty);
-          prod.stock_disponible = prod.stock;
-        }
-      });
-    }
-
-    console.log(`🛒 ¡Venta registrada en TIEMPO REAL! ID: ${saleId}, Total: $${numTotal}`);
-    return res.status(201).json({
-      ok: true,
-      message: 'Venta registrada con éxito en tiempo real.',
-      sale: newSaleItem
-    });
-  } catch (error) {
-    console.error('Error al registrar pedido:', error);
-    return res.status(500).json({ message: 'Error interno al procesar el pedido.' });
-  }
-});
-
-app.post('/api/sales', async (req, res) => {
-  const { userId, total, deliveryDetails, items } = req.body;
-  const numTotal = Number(total);
-
-  try {
-    const saleId = Date.now();
-    const nowIso = new Date().toISOString();
-
-    const newSaleItem = {
-      id_venta: saleId,
-      id_usuario: userId || null,
-      total: numTotal,
-      fecha: nowIso,
-      estado: 'En proceso',
-      email: deliveryDetails?.email || null,
-      nombre: deliveryDetails?.fullName || 'Cliente Realtime',
-      deliveryDetails: deliveryDetails || {},
-      items: items || []
-    };
-
-    FALLBACK_SALES.unshift(newSaleItem);
-    saveFallbackSales(FALLBACK_SALES);
-
-    return res.status(201).json({ ok: true, sale: newSaleItem });
-  } catch (err) {
-    return res.status(500).json({ message: 'Error al guardar venta.' });
-  }
-});
-
-// Endpoint para crear un nuevo Administrador y enrolar su Face ID
-app.post('/api/admin/create-admin', requireAdmin, async (req, res) => {
-  let { name, lastName, email, password } = req.body;
-  if (!name || !email || !password) {
-    return res.status(400).json({ message: 'Nombre, correo y contraseña son obligatorios.' });
-  }
-
-  try {
-    const hashedPassword = await bcrypt.hash(password, saltRounds);
-
-    const { data: newUser, error } = await supabase
-      .from('usuario')
-      .insert([{ nombre: name, apellido: lastName || '', email, password_hash: hashedPassword, rol: 'admin' }])
-      .select()
-      .single();
-
-    if (error) {
-      console.error('Error al insertar nuevo admin:', error);
-      throw error;
-    }
-
-    const createdUser = newUser || { id_usuario: Date.now(), nombre: name, apellido: lastName, email, rol: 'admin' };
-
-    return res.status(201).json({
-      ok: true,
-      message: 'Administrador registrado con éxito.',
-      user: createdUser
-    });
-  } catch (error) {
-    console.error('Error en /api/admin/create-admin:', error);
-    return res.status(500).json({ message: error.message || 'Error interno al crear el administrador.' });
-  }
+  // Se arma el objeto campo por campo: aunque la consulta cambie, nunca sale password_hash.
+  const { id_usuario, nombre: nombreNuevo, apellido: apellidoNuevo, email: emailNuevo, rol } = newUser;
+  return res.status(201).json({
+    ok: true,
+    message: 'Administrador registrado con éxito.',
+    user: { id_usuario, nombre: nombreNuevo, apellido: apellidoNuevo, email: emailNuevo, rol }
+  });
 });
 
 // Nota: Para añadir un usuario se usa el flujo de /api/register (con o sin admin check).
 // Nota: La tabla de productos puede no estar completamente configurada en Supabase según los datos, 
 // pero dejamos el endpoint preparado.
 // Endpoint para agregar un nuevo producto al catálogo
-app.post('/api/admin/products', requireAdmin, async (req, res) => {
+app.post('/api/admin/products', requireAdmin, cuerpoGrande, async (req, res) => {
   let { name, description, price, category, image, featured, stock, nombre, descripcion, precio, categoria, prompt_usado, prompt3d, prompt } = req.body;
 
   name = name || nombre;
@@ -2647,14 +2687,29 @@ app.post('/api/payments/process', limitadorPagos, async (req, res) => {
 });
 
 // ─── Chatbot (MCP RBAC) ──────────────────────────────────────
-app.post('/api/chatbot', async (req, res) => {
-  await handleChatbotRequest(req, res, supabase);
+// Límite de mensajes al chatbot (cada uno cuesta llamadas al modelo). Configurable por entorno:
+//   CHATBOT_RATE_LIMIT_MAX (mensajes por ventana, 20 por defecto) y CHATBOT_RATE_LIMIT_WINDOW_MS (60000).
+const VENTANA_CHATBOT_MS = Number(process.env.CHATBOT_RATE_LIMIT_WINDOW_MS) || 60 * 1000;
+const limitadorChatbot = rateLimit({
+  windowMs: VENTANA_CHATBOT_MS,
+  limit: Number(process.env.CHATBOT_RATE_LIMIT_MAX) || 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: (req, res) =>
+    res.status(429).json({ ok: false, message: `Demasiados mensajes seguidos. Espera ${Math.ceil(VENTANA_CHATBOT_MS / 60000)} minuto(s) e inténtalo de nuevo.` })
+});
+
+// La identidad del chatbot sale SOLO del token (Authorization: Bearer). Sin token válido = visitante anónimo.
+app.post('/api/chatbot', limitadorChatbot, async (req, res) => {
+  const authHeader = req.headers['authorization'] || '';
+  const sesion = authHeader.startsWith('Bearer ') ? verifyTokenSafely(authHeader.slice(7)) : null;
+  await handleChatbotRequest(req, res, supabase, { sesion, estadosCobrados: ESTADOS_COBRADOS });
 });
 
 // ─── TRI PO 3D AI GENERATOR ENDPOINTS ─────────────────────────
 
 // Consultar el estado o la URL del modelo 3D de un producto
-app.get('/api/admin/products/:id/model-3d', async (req, res) => {
+app.get('/api/admin/products/:id/model-3d', requireAdmin, async (req, res) => {
   const { id } = req.params;
   const prodId = parseInt(id, 10);
 
@@ -2751,6 +2806,17 @@ app.post('/api/admin/products/:id/regenerate-3d', requireAdmin, async (req, res)
     console.error('Error al iniciar regeneración 3D:', error);
     return res.status(500).json({ message: error.message || 'Error al conectar con la API de Tripo AI.' });
   }
+});
+
+// Errores al leer el cuerpo (demasiado grande o JSON mal formado): respuesta JSON en español.
+app.use((err, req, res, next) => {
+  if (err?.type === 'entity.too.large') {
+    return res.status(413).json({ ok: false, message: 'La información enviada es demasiado grande.' });
+  }
+  if (err?.type === 'entity.parse.failed') {
+    return res.status(400).json({ ok: false, message: 'La información enviada no tiene un formato válido.' });
+  }
+  return next(err);
 });
 
 if (require.main === module) {

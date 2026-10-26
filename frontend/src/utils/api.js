@@ -51,18 +51,8 @@ export function clearSessionAndRedirect() {
  */
 export async function apiFetch(path, options = {}) {
   const token = getToken();
-  const savedUser = localStorage.getItem('superGelatto_user') || sessionStorage.getItem('superGelatto_user');
-  let userRole = null;
-  try {
-    if (savedUser) {
-      const parsed = JSON.parse(savedUser);
-      userRole = parsed?.rol;
-    }
-  } catch (e) {}
-
   const headers = {
     'Content-Type': 'application/json',
-    ...(userRole ? { 'x-user-role': userRole } : {}),
     ...(options.headers || {}),
   };
 

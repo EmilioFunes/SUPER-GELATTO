@@ -126,7 +126,8 @@ export function crearFakeSupabase() {
         contadoresId[llamada.tabla] = (contadoresId[llamada.tabla] || 1000) + 1;
         return { ...fila, [colId]: contadoresId[llamada.tabla] };
       });
-      return { data: llamada.modo === 'single' ? filas[0] : filas, error: null };
+      // single/maybeSingle devuelven una fila (objeto), como supabase-js; si no, un arreglo.
+      return { data: llamada.modo === 'varias' ? filas : filas[0] ?? null, error: null };
     }
     return { data: llamada.modo === 'varias' ? [] : null, error: null };
   }
@@ -143,7 +144,11 @@ export function crearFakeSupabase() {
       b[n] = encadenar(n);
     }
     // select() tras insert/update solo pide devolver filas; no cambia la operación.
-    b.select = () => b;
+    // En una lectura se guardan las columnas pedidas (llamada.columnas) para poder comprobarlas.
+    b.select = (cols) => {
+      if (llamada.op === 'select') llamada.columnas = cols;
+      return b;
+    };
     for (const op of ['insert', 'update', 'upsert', 'delete']) {
       b[op] = (payload) => {
         llamada.op = op;

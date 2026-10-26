@@ -1258,26 +1258,24 @@ const AdminDashboard = ({ user, onLogout }) => {
                 <tbody className="divide-y divide-white/5">
                   {Array.from(new Map((dashboardData?.users || []).map((u, idx) => [u.id_usuario || u.id || `user-${idx}`, u])).values()).map((u, idx) => {
                     const userId = u.id_usuario || u.id || idx;
-                    const SUPER_ADMIN_EMAIL = 'muneracristian63@gmail.com';
                     const savedUserStr = typeof window !== 'undefined' ? (localStorage.getItem('superGelatto_user') || sessionStorage.getItem('superGelatto_user')) : null;
                     const savedUser = savedUserStr ? JSON.parse(savedUserStr) : null;
                     const activeUser = user || savedUser;
-                    const currentUserEmail = (activeUser?.email || activeUser?.user?.email || '').toLowerCase().trim();
-                    const isCurrentUserSuperAdmin = currentUserEmail === SUPER_ADMIN_EMAIL || activeUser?.rol === 'super_admin';
+                    // El servidor marca quién es super admin (soySuperAdmin / es_super_admin); el correo no llega aquí.
+                    const isCurrentUserSuperAdmin = dashboardData?.soySuperAdmin === true || activeUser?.rol === 'super_admin';
 
-                    const targetEmail = (u.email || '').toLowerCase().trim();
-                    const isTargetSuperAdmin = targetEmail === SUPER_ADMIN_EMAIL || u.rol === 'super_admin';
+                    const isTargetSuperAdmin = u.es_super_admin === true || u.rol === 'super_admin';
                     const isTargetAdmin = u.rol === 'admin';
 
                     // Modificación de Rol:
-                    // 1. Nadie puede cambiar el rol del Super Admin principal (muneracristian63@gmail.com).
-                    // 2. Si el objetivo es Administrador, SOLO el Super Admin (muneracristian63@gmail.com) puede cambiar su rol.
+                    // 1. Nadie puede cambiar el rol del Super Admin principal.
+                    // 2. Si el objetivo es Administrador, SOLO el Super Admin puede cambiar su rol.
                     // 3. Si el objetivo es Cliente, cualquier Administrador puede ascenderlo a admin.
                     const canEditRole = !isTargetSuperAdmin && (!isTargetAdmin || isCurrentUserSuperAdmin);
 
                     // Eliminación de Usuario:
-                    // 1. Nadie puede eliminar la cuenta principal del Super Admin (muneracristian63@gmail.com).
-                    // 2. Si el objetivo es Administrador, SOLO la cuenta de Super Admin (muneracristian63@gmail.com) puede eliminarlo.
+                    // 1. Nadie puede eliminar la cuenta principal del Super Admin.
+                    // 2. Si el objetivo es Administrador, SOLO la cuenta de Super Admin puede eliminarlo.
                     // 3. Si el objetivo es Cliente, cualquier Administrador (Super Admin o Admin normal) puede eliminarlo.
                     const canDeleteUser = !isTargetSuperAdmin && (
                       !isTargetAdmin || (isTargetAdmin && isCurrentUserSuperAdmin && String(userId) !== String(activeUser?.id_usuario || activeUser?.id || activeUser?.user?.id))
@@ -1300,7 +1298,7 @@ const AdminDashboard = ({ user, onLogout }) => {
                             value={u.rol || 'cliente'}
                             disabled={!canEditRole || actionLoading === `role-${userId}`}
                             onChange={(e) => handleUpdateRole(userId, e.target.value)}
-                            title={!canEditRole ? (isTargetSuperAdmin ? 'Cuenta principal protegida' : 'Solo la cuenta de Super Admin (muneracristian63@gmail.com) puede cambiar el rol de un administrador') : 'Cambiar rol'}
+                            title={!canEditRole ? (isTargetSuperAdmin ? 'Cuenta principal protegida' : 'Solo la cuenta de Super Admin puede cambiar el rol de un administrador') : 'Cambiar rol'}
                             className={`px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider focus:outline-none transition-all ${
                               !canEditRole ? 'opacity-60 cursor-not-allowed ' : 'cursor-pointer '
                             }${
@@ -1327,7 +1325,7 @@ const AdminDashboard = ({ user, onLogout }) => {
                           ) : (
                             <span 
                               className="text-[10px] text-white/20 font-mono uppercase tracking-wider select-none"
-                              title={isTargetSuperAdmin ? "La cuenta principal de Super Admin está protegida y no se puede eliminar" : "Solo la cuenta principal de Super Admin (muneracristian63@gmail.com) puede eliminar administradores"}
+                              title={isTargetSuperAdmin ? "La cuenta principal de Super Admin está protegida y no se puede eliminar" : "Solo la cuenta principal de Super Admin puede eliminar administradores"}
                             >
                               Protegido
                             </span>
