@@ -592,8 +592,26 @@ app.use(cors({
   },
   credentials: true
 }));
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ limit: '50mb', extended: true }));
+// Tamaño máximo del cuerpo: 1 MB para todo (antes 50 MB: cualquiera podía mandar cuerpos enormes y
+// gastar memoria del servidor). Solo las rutas que reciben fotos en base64 (Face ID y crear producto)
+// aceptan hasta 8 MB; esas no pasan por el lector global sino por cuerpoGrande, que se pone en la ruta
+// DESPUÉS de comprobar la sesión de admin o el límite de intentos.
+const LIMITE_CUERPO = '1mb';
+const LIMITE_CUERPO_GRANDE = '8mb';
+const RUTAS_CUERPO_GRANDE = new Set([
+  '/api/admin/products',
+  '/api/admin/faceid/rekognition-login',
+  '/api/admin/faceid/rekognition-register',
+]);
+const leerJson = express.json({ limit: LIMITE_CUERPO });
+const leerFormulario = express.urlencoded({ limit: LIMITE_CUERPO, extended: true });
+const cuerpoGrande = [
+  express.json({ limit: LIMITE_CUERPO_GRANDE }),
+  express.urlencoded({ limit: LIMITE_CUERPO_GRANDE, extended: true }),
+];
+const esRutaCuerpoGrande = (req) => req.method === 'POST' && RUTAS_CUERPO_GRANDE.has(req.path);
+app.use((req, res, next) => (esRutaCuerpoGrande(req) ? next() : leerJson(req, res, next)));
+app.use((req, res, next) => (esRutaCuerpoGrande(req) ? next() : leerFormulario(req, res, next)));
 
 app.use((req, res, next) => {
   res.setHeader('Cross-Origin-Opener-Policy', 'same-origin-allow-popups');
@@ -839,6 +857,41 @@ function requireAuthenticatedAdmin(req, res, next) {
 // Alias para mantener compatibilidad con rutas existentes
 const requireAdmin = requireAuthenticatedAdmin;
 
+// Middleware para rutas que necesitan una sesión cualquiera (cliente o admin): solo Authorization: Bearer
+// verificado con verifyTokenSafely. Deja el contenido del token en req.user.
+function requireAuth(req, res, next) {
+  const authHeader = req.headers['authorization'] || '';
+  const sesion = authHeader.startsWith('Bearer ') ? verifyTokenSafely(authHeader.slice(7)) : null;
+  if (!sesion) {
+    return res.status(401).json({ ok: false, message: 'Debes iniciar sesión. Tu sesión no es válida o expiró.' });
+  }
+  req.user = sesion;
+  next();
+}
+
+const esSesionAdmin = (sesion) => sesion?.rol === 'admin' || sesion?.rol === 'super_admin';
+
+// Límite de intentos en las rutas de cuenta (login, google-login, register, forgot-password y
+// rekognition-login), contra bots que prueban contraseñas o crean cuentas en masa. Cada ruta lleva su
+// propia cuenta por IP. Configurable por entorno: LOGIN_RATE_LIMIT_MAX (intentos por ventana, 10 por
+// defecto) y LOGIN_RATE_LIMIT_WINDOW_MS (15 minutos por defecto).
+const VENTANA_LOGIN_MS = Number(process.env.LOGIN_RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000;
+function crearLimitadorCuenta() {
+  return rateLimit({
+    windowMs: VENTANA_LOGIN_MS,
+    limit: Number(process.env.LOGIN_RATE_LIMIT_MAX) || 10,
+    standardHeaders: true,
+    legacyHeaders: false,
+    handler: (req, res) =>
+      res.status(429).json({ ok: false, message: `Demasiados intentos. Espera ${Math.ceil(VENTANA_LOGIN_MS / 60000)} minuto(s) e inténtalo de nuevo.` })
+  });
+}
+const limitadorLogin = crearLimitadorCuenta();
+const limitadorGoogleLogin = crearLimitadorCuenta();
+const limitadorRegistro = crearLimitadorCuenta();
+const limitadorOlvidoClave = crearLimitadorCuenta();
+const limitadorLoginFacial = crearLimitadorCuenta();
+
 // Helper para asignar imágenes reales basadas en el nombre
 function getProductImage(name) {
   const n = (name || '').toLowerCase();
@@ -1000,7 +1053,7 @@ function getFlavorData(name) {
 }
 
 // ─── Register (CON BCRYPT) ──────────────────────────────────
-app.post('/api/register', async (req, res) => {
+app.post('/api/register', limitadorRegistro, async (req, res) => {
   let { name, lastName, email, password, confirmPassword } = req.body;
 
   if (hasForbiddenChars(name) || hasForbiddenChars(lastName) || hasForbiddenChars(email)) {
@@ -1073,7 +1126,7 @@ app.post('/api/register', async (req, res) => {
 });
 
 // ─── Login (CON BCRYPT) ─────────────────────────────────────
-app.post('/api/login', async (req, res) => {
+app.post('/api/login', limitadorLogin, async (req, res) => {
   const { email, password } = req.body;
 
   if (!email || !password) return res.status(400).json({ message: 'Campos obligatorios.' });
@@ -1126,7 +1179,7 @@ app.post('/api/login', async (req, res) => {
 // ─── AWS Rekognition (Reconocimiento Facial Admin) ─────────────────
 
 // 1. Registro Facial con AWS Rekognition (Protegido Admin)
-app.post('/api/admin/faceid/rekognition-register', requireAuthenticatedAdmin, async (req, res) => {
+app.post('/api/admin/faceid/rekognition-register', requireAuthenticatedAdmin, cuerpoGrande, async (req, res) => {
   try {
     const { image } = req.body;
     const userId = req.user.id_usuario;
@@ -1190,7 +1243,7 @@ app.post('/api/admin/faceid/rekognition-register', requireAuthenticatedAdmin, as
 });
 
 // 2. Login Facial con AWS Rekognition (Público)
-app.post('/api/admin/faceid/rekognition-login', async (req, res) => {
+app.post('/api/admin/faceid/rekognition-login', limitadorLoginFacial, cuerpoGrande, async (req, res) => {
   const genericError = { ok: false, message: 'Reconocimiento facial no reconocido o acceso denegado.' };
   try {
     const { image } = req.body;
@@ -1330,7 +1383,7 @@ function respuestaSesionGoogle(res, usuario, emailVerificado, mensaje) {
   });
 }
 
-app.post('/api/google-login', async (req, res) => {
+app.post('/api/google-login', limitadorGoogleLogin, async (req, res) => {
   if (!googleOAuthClient) {
     return res.status(503).json({ ok: false, message: 'El inicio de sesión con Google no está disponible en este momento.' });
   }
@@ -1391,7 +1444,7 @@ app.post('/api/google-login', async (req, res) => {
 });
 
 // ─── Forgot Password ───────────────────────────────────────
-app.post('/api/forgot-password', async (req, res) => {
+app.post('/api/forgot-password', limitadorOlvidoClave, async (req, res) => {
   const { email } = req.body;
 
   if (!email) return res.status(400).json({ message: 'Email es obligatorio.' });
@@ -1489,56 +1542,74 @@ app.post('/api/reset-password/:token', async (req, res) => {
   }
 });
 
-// ─── Orders (using 'venta' table for sales with real-time fallback merge) ────────────────
-app.get('/api/orders/:userId', async (req, res) => {
-  const { userId } = req.params;
-  try {
-    let dbOrders = [];
-    const { data: supaOrders, error } = await supabase
-      .from('venta')
-      .select('*')
-      .eq('id_usuario', userId)
-      .order('fecha', { ascending: false });
+// ─── Pedidos del usuario ──────────────────────────────────────
+// Solo con sesión: el dueño o un administrador. Lee SOLO de la base (la tabla venta), con columnas
+// concretas y paginado: ?limit= (máximo 50) y ?offset=. Si la base falla -> 500, nunca una lista vacía.
+const MAX_PEDIDOS_POR_PAGINA = 50;
 
-    if (supaOrders) {
-      dbOrders = supaOrders;
-    } else if (error) {
-      console.warn('Advertencia obteniendo pedidos de Supabase:', error.message);
-    }
+// Entero >= 0 de la URL; si no viene, el valor por defecto; si es inválido, NaN.
+function enteroDeConsulta(valor, porDefecto) {
+  if (valor === undefined) return porDefecto;
+  return /^\d+$/.test(String(valor)) ? Number(valor) : NaN;
+}
 
-    // Mergear con FALLBACK_SALES en tiempo real para este usuario
-    const ordersMap = new Map();
-    dbOrders.forEach(o => ordersMap.set(String(o.id_venta), o));
-
-    FALLBACK_SALES.forEach(f => {
-      if (String(f.id_usuario) === String(userId)) {
-        if (!ordersMap.has(String(f.id_venta))) {
-          ordersMap.set(String(f.id_venta), f);
-        } else {
-          // Si el admin actualizó el estado en FALLBACK_SALES, usar el estado más reciente
-          const existing = ordersMap.get(String(f.id_venta));
-          existing.estado = f.estado || existing.estado;
-        }
-      }
-    });
-
-    const combinedOrders = Array.from(ordersMap.values()).sort(
-      (a, b) => new Date(b.fecha) - new Date(a.fecha)
-    );
-
-    return res.status(200).json(combinedOrders);
-  } catch (err) {
-    console.error('Error al obtener pedidos:', err);
-    return res.status(500).json({ message: 'Error al obtener pedidos.' });
+app.get('/api/orders/:userId', requireAuth, async (req, res) => {
+  if (!/^\d+$/.test(String(req.params.userId))) {
+    return res.status(400).json({ ok: false, message: 'Identificador de usuario no válido.' });
   }
+  const userId = Number(req.params.userId);
+  if (String(req.user.id_usuario) !== String(userId) && !esSesionAdmin(req.user)) {
+    return res.status(403).json({ ok: false, message: 'No puedes ver los pedidos de otra persona.' });
+  }
+
+  const limite = enteroDeConsulta(req.query.limit, MAX_PEDIDOS_POR_PAGINA);
+  const desde = enteroDeConsulta(req.query.offset, 0);
+  if (!Number.isSafeInteger(limite) || limite < 1 || !Number.isSafeInteger(desde)) {
+    return res.status(400).json({ ok: false, message: 'Paginación no válida.' });
+  }
+  const porPagina = Math.min(limite, MAX_PEDIDOS_POR_PAGINA);
+
+  const { data, error } = await supabase
+    .from('venta')
+    .select('id_venta, fecha, total, estado')
+    .eq('id_usuario', userId)
+    .order('fecha', { ascending: false })
+    .range(desde, desde + porPagina - 1);
+  if (falloSupabase(res, error, 'Error al obtener pedidos.')) return;
+  return res.status(200).json(data || []);
 });
 
-
-
 // ─── Update User Profile ─────────────────────────────────────
-app.put('/api/users/:id', async (req, res) => {
-  const { id } = req.params;
-  let { name, email, picture, avatar } = req.body;
+// Solo con sesión: el propio usuario o un administrador. Solo se cambian nombre y correo (lista blanca):
+// rol, contraseña, id o cualquier otro campo del cuerpo se ignoran. Un admin normal edita clientes y a sí
+// mismo; a los demás administradores (y al super admin) solo los modifica el super admin
+// (SUPER_ADMIN_EMAIL). Los correos de administradores (ADMIN_EMAILS) están reservados.
+const MAX_LARGO_NOMBRE = 100;
+const MAX_LARGO_EMAIL = 254;
+
+const mismoCorreo = (a, b) => String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
+
+app.put('/api/users/:id', requireAuth, async (req, res) => {
+  if (!/^\d+$/.test(String(req.params.id))) {
+    return res.status(400).json({ ok: false, message: 'Identificador de usuario no válido.' });
+  }
+  const id = Number(req.params.id);
+  const sesion = req.user;
+  const esPropio = String(sesion.id_usuario) === String(id);
+  const sesionEsSuper = esSuperAdminEmail(sesion.email);
+  if (!esPropio && !esSesionAdmin(sesion)) {
+    return res.status(403).json({ ok: false, message: 'No puedes modificar la cuenta de otra persona.' });
+  }
+
+  let { name, email } = req.body || {};
+  const { picture, avatar } = req.body || {};
+
+  if (typeof name !== 'string' || typeof email !== 'string' || !name || !email) {
+    return res.status(400).json({ ok: false, message: 'Nombre y email son obligatorios.' });
+  }
+  if (name.length > MAX_LARGO_NOMBRE || email.length > MAX_LARGO_EMAIL) {
+    return res.status(400).json({ ok: false, message: 'El nombre o el correo son demasiado largos.' });
+  }
 
   if (hasForbiddenChars(name) || hasForbiddenChars(email)) {
     return res.status(400).json({ message: 'No se permiten caracteres especiales peligrosos (< > & " \' /).' });
@@ -1568,36 +1639,65 @@ app.put('/api/users/:id', async (req, res) => {
     return res.status(400).json({ message: 'Solo se permite un espacio sencillo entre palabras.' });
   }
 
-  const userAvatar = picture || avatar || null;
+  // La foto no se guarda en la base: solo se devuelve si es un texto corto (como antes).
+  const foto = [picture, avatar].find((p) => typeof p === 'string' && p.length <= 2048) || null;
 
   try {
-    const updatePayload = { nombre: name, email: email };
-
-    const { data: updatedUser, error } = await supabase
+    // 2. La cuenta a modificar y los permisos sobre ella.
+    const { data: destino, error: errorDestino } = await supabase
       .from('usuario')
-      .update(updatePayload)
+      .select('id_usuario, email, rol')
       .eq('id_usuario', id)
-      .select().single();
+      .maybeSingle();
+    if (falloSupabase(res, errorDestino, 'Error al actualizar el perfil.')) return;
+    if (!destino) return res.status(404).json({ ok: false, message: 'Usuario no encontrado.' });
 
-    if (error) {
-      if (error.code === '23505') return res.status(409).json({ message: 'El email ya está en uso.' });
-      console.warn('Advertencia en Supabase al actualizar usuario:', error.message);
+    const destinoEsAdmin = esSesionAdmin(destino) || esSuperAdminEmail(destino.email);
+    if (!esPropio && destinoEsAdmin && !sesionEsSuper) {
+      return res.status(403).json({ ok: false, message: 'Solo el administrador principal puede modificar a otros administradores.' });
     }
 
-    const finalUser = {
-      id: updatedUser ? updatedUser.id_usuario : id,
-      name: updatedUser ? updatedUser.nombre : name,
-      email: updatedUser ? updatedUser.email : email,
-      picture: userAvatar || (updatedUser ? updatedUser.picture : null),
-    };
+    // 3. Correos reservados (super admin y ADMIN_EMAILS): nadie más puede quedárselos, aunque aún no
+    //    tengan cuenta. Conservar el correo que ya se tiene sí se permite.
+    const correoReservado = esSuperAdminEmail(email) || ADMIN_EMAILS.includes(email.trim().toLowerCase());
+    if (correoReservado && !mismoCorreo(email, destino.email) && !sesionEsSuper) {
+      return res.status(403).json({ ok: false, message: 'Ese correo está reservado y no se puede usar.' });
+    }
+
+    // 4. Correo ya usado por otra cuenta (sin distinguir mayúsculas; se escapan los comodines de ilike).
+    if (!mismoCorreo(email, destino.email)) {
+      const patron = email.toLowerCase().replace(/[\\%_]/g, (c) => '\\' + c);
+      const { data: otros, error: errorDuplicado } = await supabase
+        .from('usuario')
+        .select('id_usuario, email')
+        .ilike('email', patron)
+        .neq('id_usuario', id)
+        .limit(5);
+      if (falloSupabase(res, errorDuplicado, 'Error al actualizar el perfil.')) return;
+      if ((otros || []).some((u) => mismoCorreo(u.email, email))) {
+        return res.status(409).json({ ok: false, message: 'El email ya está en uso.' });
+      }
+    }
+
+    // 5. Guardar solo nombre y correo.
+    const { data: actualizado, error } = await supabase
+      .from('usuario')
+      .update({ nombre: name, email })
+      .eq('id_usuario', id)
+      .select('id_usuario, nombre, email')
+      .single();
+    if (error?.code === '23505') return res.status(409).json({ ok: false, message: 'El email ya está en uso.' });
+    if (falloSupabase(res, error, 'Error al actualizar el perfil.')) return;
+    if (!actualizado) return res.status(404).json({ ok: false, message: 'Usuario no encontrado.' });
 
     return res.status(200).json({
+      ok: true,
       message: 'Perfil actualizado correctamente.',
-      user: finalUser
+      user: { id: actualizado.id_usuario, name: actualizado.nombre, email: actualizado.email, picture: foto }
     });
   } catch (error) {
     console.error('Error updating profile:', error);
-    return res.status(500).json({ message: 'Error al actualizar el perfil.' });
+    return res.status(500).json({ ok: false, message: 'Error al actualizar el perfil.' });
   }
 });
 
@@ -1902,114 +2002,9 @@ app.put('/api/admin/sales/:id/status', requireAdmin, async (req, res) => {
   }
 });
 
-// ─── CREACIÓN Y REGISTRO DE VENTAS EN TIEMPO REAL ─────────────────
-app.post('/api/orders', async (req, res) => {
-  const { userId, total, deliveryDetails, items } = req.body;
-
-  const numTotal = Number(total);
-  if (isNaN(numTotal) || numTotal <= 0) {
-    return res.status(400).json({ message: 'El total del pedido debe ser un número mayor a 0.' });
-  }
-
-  try {
-    const saleId = Date.now();
-    const nowIso = new Date().toISOString();
-
-    const newSaleItem = {
-      id_venta: saleId,
-      id_usuario: userId || null,
-      total: numTotal,
-      fecha: nowIso,
-      estado: 'En proceso',
-      email: deliveryDetails?.email || (req.user?.email || null),
-      nombre: deliveryDetails?.fullName || 'Cliente Realtime',
-      deliveryDetails: deliveryDetails || {},
-      items: items || []
-    };
-
-    // 1. Guardar localmente para disponibilidad instantánea e infalible en tiempo real
-    FALLBACK_SALES.unshift(newSaleItem);
-    saveFallbackSales(FALLBACK_SALES);
-
-    // 2. Intentar guardar en Supabase con manejo seguro de esquema
-    try {
-      let validUserId = null;
-      if (userId) {
-        const { data: userCheck } = await supabase
-          .from('usuario')
-          .select('id_usuario')
-          .eq('id_usuario', userId)
-          .single();
-        if (userCheck) validUserId = userId;
-      }
-
-      const { error: insertErr } = await supabase.from('venta').insert([{
-        id_venta: saleId,
-        id_usuario: validUserId,
-        total: numTotal,
-        fecha: nowIso
-      }]);
-      
-      if (insertErr) {
-        console.warn('Advertencia Supabase al insertar venta:', insertErr.message);
-      }
-    } catch (supaErr) {
-      console.warn('Advertencia Supabase al insertar venta:', supaErr.message);
-    }
-
-    // 3. Descontar stock en tiempo real
-    if (Array.isArray(items)) {
-      items.forEach(item => {
-        const itemName = (item.name || item.nombre || '').toLowerCase().trim();
-        const qty = item.quantity || item.cantidad || 1;
-        const prod = FALLBACK_PRODUCTS.find(p => (p.nombre || '').toLowerCase().trim() === itemName || (p.name || '').toLowerCase().trim() === itemName);
-        if (prod) {
-          prod.stock = Math.max(0, (prod.stock !== undefined ? prod.stock : 50) - qty);
-          prod.stock_disponible = prod.stock;
-        }
-      });
-    }
-
-    console.log(`🛒 ¡Venta registrada en TIEMPO REAL! ID: ${saleId}, Total: $${numTotal}`);
-    return res.status(201).json({
-      ok: true,
-      message: 'Venta registrada con éxito en tiempo real.',
-      sale: newSaleItem
-    });
-  } catch (error) {
-    console.error('Error al registrar pedido:', error);
-    return res.status(500).json({ message: 'Error interno al procesar el pedido.' });
-  }
-});
-
-app.post('/api/sales', async (req, res) => {
-  const { userId, total, deliveryDetails, items } = req.body;
-  const numTotal = Number(total);
-
-  try {
-    const saleId = Date.now();
-    const nowIso = new Date().toISOString();
-
-    const newSaleItem = {
-      id_venta: saleId,
-      id_usuario: userId || null,
-      total: numTotal,
-      fecha: nowIso,
-      estado: 'En proceso',
-      email: deliveryDetails?.email || null,
-      nombre: deliveryDetails?.fullName || 'Cliente Realtime',
-      deliveryDetails: deliveryDetails || {},
-      items: items || []
-    };
-
-    FALLBACK_SALES.unshift(newSaleItem);
-    saveFallbackSales(FALLBACK_SALES);
-
-    return res.status(201).json({ ok: true, sale: newSaleItem });
-  } catch (err) {
-    return res.status(500).json({ message: 'Error al guardar venta.' });
-  }
-});
+// Las ventas se registran SOLO en /api/payments/process (función registrar_venta, precios de la base).
+// Las antiguas POST /api/orders y POST /api/sales se eliminaron: ninguna pantalla las usaba y guardaban
+// ventas sin sesión, con el total que mandaba el navegador.
 
 // Endpoint para crear un nuevo Administrador y enrolar su Face ID
 app.post('/api/admin/create-admin', requireAdmin, async (req, res) => {
@@ -2049,7 +2044,7 @@ app.post('/api/admin/create-admin', requireAdmin, async (req, res) => {
 // Nota: La tabla de productos puede no estar completamente configurada en Supabase según los datos, 
 // pero dejamos el endpoint preparado.
 // Endpoint para agregar un nuevo producto al catálogo
-app.post('/api/admin/products', requireAdmin, async (req, res) => {
+app.post('/api/admin/products', requireAdmin, cuerpoGrande, async (req, res) => {
   let { name, description, price, category, image, featured, stock, nombre, descripcion, precio, categoria, prompt_usado, prompt3d, prompt } = req.body;
 
   name = name || nombre;
@@ -2684,7 +2679,7 @@ app.post('/api/chatbot', limitadorChatbot, async (req, res) => {
 // ─── TRI PO 3D AI GENERATOR ENDPOINTS ─────────────────────────
 
 // Consultar el estado o la URL del modelo 3D de un producto
-app.get('/api/admin/products/:id/model-3d', async (req, res) => {
+app.get('/api/admin/products/:id/model-3d', requireAdmin, async (req, res) => {
   const { id } = req.params;
   const prodId = parseInt(id, 10);
 
@@ -2781,6 +2776,17 @@ app.post('/api/admin/products/:id/regenerate-3d', requireAdmin, async (req, res)
     console.error('Error al iniciar regeneración 3D:', error);
     return res.status(500).json({ message: error.message || 'Error al conectar con la API de Tripo AI.' });
   }
+});
+
+// Errores al leer el cuerpo (demasiado grande o JSON mal formado): respuesta JSON en español.
+app.use((err, req, res, next) => {
+  if (err?.type === 'entity.too.large') {
+    return res.status(413).json({ ok: false, message: 'La información enviada es demasiado grande.' });
+  }
+  if (err?.type === 'entity.parse.failed') {
+    return res.status(400).json({ ok: false, message: 'La información enviada no tiene un formato válido.' });
+  }
+  return next(err);
 });
 
 if (require.main === module) {
