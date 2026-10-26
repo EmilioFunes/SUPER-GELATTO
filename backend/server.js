@@ -8,6 +8,7 @@ if (process.env.NODE_ENV !== 'production') {
 const express = require('express');
 const cors = require('cors');
 const compression = require('compression');
+const rateLimit = require('express-rate-limit');
 const crypto = require('crypto');
 const nodemailer = require('nodemailer');
 const bcrypt = require('bcryptjs'); // Usamos bcryptjs para mejor compatibilidad en Windows
@@ -488,15 +489,60 @@ if (isSupabaseConfigured) {
   }
 }
 
+// En producción (o en Render) el modo simulado aprobaría pagos sin guardarlos: mejor no arrancar.
+// Se lanza al cargar el módulo (así se puede probar); `node server.js` termina con este mensaje.
+if (!supabase && (process.env.NODE_ENV === 'production' || process.env.RENDER)) {
+  throw new Error('Configuración incompleta: faltan SUPABASE_URL y/o SUPABASE_SERVICE_ROLE_KEY (o SUPABASE_KEY). En producción el servidor no arranca sin base de datos, para no aprobar pagos que no se guardan.');
+}
+
 if (!supabase) {
   console.warn('⚠️ Advertencia: Usando base de datos en memoria (Mock Supabase) debido a la falta de configuración válida.');
+  // Versión simulada de la función registrar_venta de la base: misma forma de respuesta
+  // ({id_venta,total,estado,items}) y mismos errores de negocio, con el catálogo local.
+  // El precio sale del catálogo, nunca del cliente. (No descuenta stock: es solo para modo simulado.)
+  const mockRegistrarVenta = ({ p_id_usuario, p_items, p_estado }) => {
+    const falla = (message) => ({ data: null, error: { code: 'P0001', message } });
+    if (!ESTADOS_VENTA.includes(p_estado)) return falla('ESTADO_INVALIDO');
+    if (!Array.isArray(p_items) || p_items.length === 0) return falla('CARRITO_VACIO');
+    if (p_items.length > MAX_ITEMS_CARRITO) return falla('CARRITO_DEMASIADO_GRANDE');
+    const items = [];
+    for (const it of p_items) {
+      const cantidad = it && it.cantidad;
+      if (!Number.isInteger(cantidad) || cantidad < 1) return falla('CANTIDAD_INVALIDA');
+      const prod = FALLBACK_PRODUCTS.find((p) => p.id_producto === (it && it.id_producto));
+      if (!prod) return falla('PRODUCTO_NO_EXISTE');
+      if (prod.estado === false) return falla('PRODUCTO_INACTIVO');
+      items.push({
+        id_producto: prod.id_producto,
+        nombre: prod.nombre,
+        cantidad,
+        precio_unitario: prod.precio,
+        subtotal: prod.precio * cantidad
+      });
+    }
+    const total = items.reduce((suma, i) => suma + i.subtotal, 0);
+    const id_venta = mockDb.venta.length + 1;
+    mockDb.venta.push({ id_venta, id_usuario: p_id_usuario ?? null, total, estado: p_estado, fecha: new Date().toISOString() });
+    return { data: { id_venta, total, estado: p_estado, items }, error: null };
+  };
+
   supabase = {
     from: (tableName) => makeQueryBuilder(tableName),
-    rpc: (name, args) => Promise.resolve({ data: [], error: null })
+    rpc: (name, args) => {
+      if (name === 'registrar_venta') return Promise.resolve(mockRegistrarVenta(args));
+      return Promise.resolve({ data: [], error: null });
+    }
   };
 }
 
 const app = express();
+// Detrás del proxy de Render (el frontend apunta a *.onrender.com) la IP real llega en X-Forwarded-For;
+// sin esto el límite de intentos vería a todos los clientes como una sola IP. Solo se confía en 1 salto
+// (el proxy de Render) y solo si estamos en Render o se pide con TRUST_PROXY=1: en local, confiar en esa
+// cabecera dejaría a cualquiera falsificar su IP para esquivar el límite.
+if (process.env.RENDER || process.env.TRUST_PROXY === '1') {
+  app.set('trust proxy', 1);
+}
 app.use(compression());
 const PORT = process.env.PORT || 5000;
 const saltRounds = 10; // <--- Configuración de seguridad
@@ -596,12 +642,15 @@ async function sendStatusUpdateEmail({ saleId, customerEmail, customerName, newS
   try {
     const emailTransporter = await getTransporter();
     const fromEmail = process.env.SMTP_USER || 'no-reply@supergelatto.com';
-    const orderCode = `#SG-${saleId}`;
-    const formattedTotal = typeof total === 'number' ? `$ ${total.toLocaleString('es-CO')}` : (total || '');
+    // Todo lo que viene del usuario, de la URL o de la base va escapado antes de entrar al HTML.
+    const orderCode = escapeHtml(`#SG-${saleId}`);
+    const safeName = escapeHtml(customerName || 'Cliente');
+    const safeStatus = escapeHtml(newStatus);
+    const formattedTotal = escapeHtml(typeof total === 'number' ? `$ ${total.toLocaleString('es-CO')}` : (total || ''));
 
     let statusBg = '#d4af37';
     let statusText = 'Actualización de Pedido';
-    let statusMessage = `El estado de tu pedido <strong>${orderCode}</strong> ha sido actualizado a <strong>${newStatus}</strong>.`;
+    let statusMessage = `El estado de tu pedido <strong>${orderCode}</strong> ha sido actualizado a <strong>${safeStatus}</strong>.`;
 
     switch (newStatus) {
       case 'En proceso':
@@ -636,7 +685,7 @@ async function sendStatusUpdateEmail({ saleId, customerEmail, customerName, newS
         </div>
 
         <div style="padding: 28px 24px;">
-          <p style="font-size: 16px; color: #e5e5e5; margin-top: 0;">Hola <strong style="color: #ffffff;">${customerName || 'Cliente'}</strong>,</p>
+          <p style="font-size: 16px; color: #e5e5e5; margin-top: 0;">Hola <strong style="color: #ffffff;">${safeName}</strong>,</p>
           <p style="font-size: 15px; color: #cccccc; line-height: 1.6;">
             ${statusMessage}
           </p>
@@ -644,7 +693,7 @@ async function sendStatusUpdateEmail({ saleId, customerEmail, customerName, newS
           <div style="background-color: #171717; border: 1px solid #333333; border-radius: 12px; padding: 22px; margin: 25px 0; text-align: center;">
             <span style="font-size: 11px; color: #a3a3a3; text-transform: uppercase; letter-spacing: 1px; display: block; margin-bottom: 10px;">Nuevo Estado del Pedido</span>
             <div style="display: inline-block; background-color: ${statusBg}; color: #000000; font-weight: bold; font-size: 15px; padding: 8px 24px; border-radius: 20px; text-transform: uppercase; letter-spacing: 1px;">
-              ${newStatus}
+              ${safeStatus}
             </div>
             
             <div style="margin-top: 20px; border-top: 1px dashed #333333; padding-top: 16px; display: flex; justify-content: space-around;">
@@ -1630,7 +1679,9 @@ app.get('/api/admin/dashboard', requireAdmin, async (req, res) => {
     const products = Array.from(prodMap.values());
 
     // Calcular estadísticas
-    const totalRevenue = sales.reduce((sum, sale) => sum + (sale.total || 0), 0);
+    const totalRevenue = sales
+      .filter(sale => ESTADOS_COBRADOS.includes(sale.estado))
+      .reduce((sum, sale) => sum + (Number(sale.total) || 0), 0);
     const activeUsers = users.filter(u => u.rol === 'cliente').length;
 
     return res.status(200).json({
@@ -1747,22 +1798,44 @@ app.put('/api/admin/users/:id/role', requireAdmin, async (req, res) => {
   }
 });
 
+// Estados permitidos para una venta: deben coincidir con venta_estado_check de la base.
+const ESTADOS_VENTA = ['Pendiente', 'Pagado', 'Fallido', 'En proceso', 'En entrega', 'Enviado', 'Entregado', 'Completado', 'Cancelado'];
+// Estados de ventas realmente cobradas (cuentan como ingreso). Pendiente, Fallido y Cancelado no.
+const ESTADOS_COBRADOS = ['Pagado', 'En proceso', 'En entrega', 'Enviado', 'Entregado', 'Completado'];
+
+// supabase-js no lanza excepciones: devuelve { error }. Si hay error, responde 500 y devuelve true.
+function falloSupabase(res, error, mensaje) {
+  if (!error) return false;
+  console.error(mensaje, error);
+  res.status(500).json({ ok: false, message: mensaje });
+  return true;
+}
+
 // Endpoint para actualizar el estado de una venta (orden) y notificar al cliente por correo
 app.put('/api/admin/sales/:id/status', requireAdmin, async (req, res) => {
   const { id } = req.params;
   const { estado } = req.body;
 
-  const validStatuses = ['En proceso', 'En entrega', 'Enviado', 'Entregado', 'Completado', 'Cancelado'];
-  if (!estado || !validStatuses.includes(estado)) {
+  if (!estado || !ESTADOS_VENTA.includes(estado)) {
     return res.status(400).json({ message: 'Estado de venta no válido.' });
   }
 
   try {
+    // 1. Primero la base: si falla, no se dice que salió bien ni se avisa al cliente.
+    const { data: ventaBd, error } = await supabase
+      .from('venta')
+      .update({ estado })
+      .eq('id_venta', id)
+      .select('id_venta, id_usuario, total')
+      .maybeSingle();
+
+    if (falloSupabase(res, error, 'Error al actualizar el estado de la venta.')) return;
+
     let customerEmail = null;
     let customerName = null;
     let totalValue = null;
 
-    // 1. Buscar primero en FALLBACK_SALES
+    // 2. Actualizar en FALLBACK_SALES (deuda técnica: archivo local paralelo a la base)
     const fbSale = FALLBACK_SALES.find(s => String(s.id_venta) === String(id));
     if (fbSale) {
       fbSale.estado = estado;
@@ -1772,34 +1845,26 @@ app.put('/api/admin/sales/:id/status', requireAdmin, async (req, res) => {
       saveFallbackSales(FALLBACK_SALES);
     }
 
-    // 2. Actualizar en Supabase
-    const { data: supaSale, error } = await supabase
-      .from('venta')
-      .update({ estado })
-      .eq('id_venta', id)
-      .select()
-      .maybeSingle();
-
-    if (error) {
-      console.warn('Advertencia al actualizar estado en Supabase:', error.message);
-    }
-
-    // 3. Buscar datos del cliente si no los teníamos en memoria
-    if (!customerEmail) {
-      const saleData = supaSale || (await supabase.from('venta').select('*').eq('id_venta', id).maybeSingle()).data;
-      if (saleData) {
-        totalValue = totalValue || saleData.total;
-        if (saleData.id_usuario) {
-          const { data: userData } = await supabase.from('usuario').select('email, nombre, apellido').eq('id_usuario', saleData.id_usuario).maybeSingle();
-          if (userData) {
-            customerEmail = userData.email;
-            customerName = `${userData.nombre || ''} ${userData.apellido || ''}`.trim();
-          }
+    // 3. Datos del cliente desde la base si no estaban en memoria
+    if (!customerEmail && ventaBd) {
+      totalValue = totalValue || ventaBd.total;
+      if (ventaBd.id_usuario) {
+        const { data: userData, error: userErr } = await supabase
+          .from('usuario')
+          .select('email, nombre, apellido')
+          .eq('id_usuario', ventaBd.id_usuario)
+          .maybeSingle();
+        if (userErr) {
+          // El estado ya quedó guardado; solo se omite el correo.
+          console.warn('No se pudo leer el cliente para avisarle del cambio de estado:', userErr.message);
+        } else if (userData) {
+          customerEmail = userData.email;
+          customerName = `${userData.nombre || ''} ${userData.apellido || ''}`.trim();
         }
       }
     }
 
-    // 4. Disparar el envío de correo de notificación (Asíncrono)
+    // 4. Disparar el envío de correo de notificación (asíncrono: no frena la respuesta)
     if (customerEmail) {
       sendStatusUpdateEmail({
         saleId: id,
@@ -1987,61 +2052,14 @@ app.post('/api/admin/products', requireAdmin, async (req, res) => {
   }
 
   const numStock = stock !== undefined && stock !== null && !isNaN(parseInt(stock, 10)) ? Math.max(0, parseInt(stock, 10)) : 50;
-
   try {
-    // 1. Calcular próximo ID de tipo entero válido (< 2.147.483.647) para PostgreSQL
-    let maxId = 0;
-    try {
-      const { data: existingProds } = await supabase.from('producto').select('id_producto').order('id_producto', { ascending: false }).limit(20);
-      if (existingProds && existingProds.length > 0) {
-        maxId = Math.max(...existingProds.map(p => Number(p.id_producto) || 0).filter(id => id < 2000000000));
-      }
-    } catch (e) {}
 
-    FALLBACK_PRODUCTS.forEach(p => {
-      const pId = Number(p.id_producto || p.id || 0);
-      if (pId > maxId && pId < 2000000000) maxId = pId;
-    });
-
-    const nextId = maxId > 0 ? maxId + 1 : 13;
     const finalImage = image || getProductImage(name);
     const isFeatured = Boolean(featured);
     const cat = category || 'Clásico';
     const desc = description || '';
 
-    const supaProdItem = {
-      id_producto: nextId,
-      nombre: name,
-      precio: numPrice,
-      descripcion: desc,
-      imagen: finalImage,
-      categoria: cat,
-      stock: numStock,
-      estado: true
-    };
-
-    // 2. Insertar en Supabase
-    let assignedId = nextId;
-    try {
-      const { data: inserted, error: insErr } = await supabase.from('producto').insert([supaProdItem]).select().maybeSingle();
-      if (insErr) {
-        console.warn('Advertencia Supabase al insertar producto con ID explícito:', insErr.message);
-        // Si falla por ID o conflicto, intentar sin id_producto explícito para que Postgres asigne el ID
-        const copyItem = { ...supaProdItem };
-        delete copyItem.id_producto;
-        const { data: insertedAuto } = await supabase.from('producto').insert([copyItem]).select().maybeSingle();
-        if (insertedAuto && insertedAuto.id_producto) {
-          assignedId = insertedAuto.id_producto;
-        }
-      } else if (inserted && inserted.id_producto) {
-        assignedId = inserted.id_producto;
-      }
-    } catch (e) {
-      console.warn('Advertencia Supabase al insertar producto:', e.message);
-    }
-
     const newProdItem = {
-      id_producto: assignedId,
       nombre: name,
       precio: numPrice,
       descripcion: desc,
@@ -2049,22 +2067,37 @@ app.post('/api/admin/products', requireAdmin, async (req, res) => {
       categoria: cat,
       destacado: isFeatured,
       stock: numStock,
-      stock_disponible: numStock,
       estado: true,
       rating: 4.9,
       reviews: 1
     };
 
-    // 3. Agregar a FALLBACK_PRODUCTS para sincronización local en memoria
-    FALLBACK_PRODUCTS.unshift(newProdItem);
+    // Insertar en Supabase o mockDb
+    // La base genera el id_producto; se pide la fila creada para conocerlo.
+    const { data: creado, error: insertErr } = await supabase
+      .from('producto')
+      .insert([newProdItem])
+      .select()
+      .single();
+    if (falloSupabase(res, insertErr, 'Error interno al crear el producto.')) return;
 
-    // 4. Iniciar generación 3D con Tripo AI si se proporcionó un prompt
+    // El id lo genera siempre la base (también la base simulada); sin id no se inventa uno.
+    if (!creado || creado.id_producto === undefined || creado.id_producto === null) {
+      console.error('La base no devolvió el id_producto del producto creado:', creado);
+      return res.status(500).json({ ok: false, message: 'Error interno al crear el producto.' });
+    }
+    const nextId = creado.id_producto;
+
+    // Agregar a FALLBACK_PRODUCTS para sincronización local en memoria
+    FALLBACK_PRODUCTS.unshift({ ...newProdItem, id_producto: nextId });
+
+    // Iniciar generación 3D con Tripo AI si se proporcionó un prompt
     let modelObj = null;
     const tripoPrompt = prompt_usado || prompt3d || prompt;
     if (tripoPrompt && tripoPrompt.trim()) {
       try {
         const taskId = await startTripoTask(tripoPrompt);
-        TRIPO_MODELS_STATE[assignedId] = {
+        TRIPO_MODELS_STATE[nextId] = {
           taskId,
           prompt: tripoPrompt,
           estado: 'generando',
@@ -2079,8 +2112,8 @@ app.post('/api/admin/products', requireAdmin, async (req, res) => {
     }
 
     const createdProductObj = {
-      id: assignedId,
-      id_producto: assignedId,
+      id: nextId,
+      id_producto: nextId,
       name: name,
       nombre: name,
       precio: numPrice,
@@ -2092,7 +2125,7 @@ app.post('/api/admin/products', requireAdmin, async (req, res) => {
       stock: numStock
     };
 
-    console.log(`🍦 ¡Producto agregado exitosamente! ID: ${assignedId}, Nombre: "${name}", Precio: $${numPrice}`);
+    console.log(`🍦 ¡Producto agregado exitosamente! ID: ${nextId}, Nombre: "${name}", Precio: $${numPrice}`);
     return res.status(201).json({
       ok: true,
       message: 'Producto creado y agregado al catálogo exitosamente.',
@@ -2170,20 +2203,15 @@ app.put('/api/admin/products/:id/featured', requireAdmin, async (req, res) => {
     const prodId = parseInt(id, 10);
     const isFeatured = Boolean(destacado);
 
-    // 1. Guardar en archivo persistente (fuente de verdad principal)
+    // 1. Base primero: si falla, no se informa éxito y no se toca ni la memoria ni el disco
+    const { error: dbErr } = await supabase.from('producto').update({ destacado: isFeatured }).eq('id_producto', prodId);
+    if (falloSupabase(res, dbErr, 'Error al actualizar estado destacado.')) return;
+
+    // 2. Guardar en archivo persistente y en memoria del fallback
     FEATURED_STATE[prodId] = isFeatured;
     saveFeaturedState(FEATURED_STATE);
-
-    // 2. Actualizar en memoria del fallback
     const fbItem = FALLBACK_PRODUCTS.find(p => p.id_producto === prodId);
     if (fbItem) fbItem.destacado = isFeatured;
-
-    // 3. Intentar Supabase (opcional, no bloquea)
-    try {
-      await supabase.from('producto').update({ destacado: isFeatured }).eq('id_producto', prodId);
-    } catch (e) {
-      console.warn('Advertencia en actualización Supabase (no crítico):', e.message);
-    }
 
     console.log(`✅ Producto ${prodId} destacado=${isFeatured} guardado en disco.`);
     return res.status(200).json({ ok: true, message: `Producto ${isFeatured ? 'destacado' : 'retirado de destacados'} con éxito.`, id: prodId, destacado: isFeatured });
@@ -2206,16 +2234,12 @@ app.put('/api/admin/products/:id/price', requireAdmin, async (req, res) => {
   try {
     const prodId = parseInt(id, 10);
 
-    // Actualizar en fallback en memoria
+    // Base primero: la copia en memoria solo cambia si la base respondió sin error
+    const { error: dbErr } = await supabase.from('producto').update({ precio: numPrice }).eq('id_producto', prodId);
+    if (falloSupabase(res, dbErr, 'Error al actualizar el precio.')) return;
+
     const fbItem = FALLBACK_PRODUCTS.find(p => p.id_producto === prodId);
     if (fbItem) fbItem.precio = numPrice;
-
-    // Intentar Supabase
-    try {
-      await supabase.from('producto').update({ precio: numPrice }).eq('id_producto', prodId);
-    } catch (e) {
-      console.warn('Advertencia Supabase al actualizar precio:', e.message);
-    }
 
     console.log(`✅ Producto ${prodId} precio=${numPrice} actualizado.`);
     return res.status(200).json({ ok: true, message: 'Precio actualizado con éxito.', id: prodId, precio: numPrice });
@@ -2238,16 +2262,12 @@ app.put('/api/admin/products/:id/category', requireAdmin, async (req, res) => {
   try {
     const prodId = parseInt(id, 10);
 
-    // Actualizar en fallback en memoria
+    // Base primero: la copia en memoria solo cambia si la base respondió sin error
+    const { error: dbErr } = await supabase.from('producto').update({ categoria }).eq('id_producto', prodId);
+    if (falloSupabase(res, dbErr, 'Error al actualizar la categoría.')) return;
+
     const fbItem = FALLBACK_PRODUCTS.find(p => p.id_producto === prodId);
     if (fbItem) fbItem.categoria = categoria;
-
-    // Intentar Supabase
-    try {
-      await supabase.from('producto').update({ categoria }).eq('id_producto', prodId);
-    } catch (e) {
-      console.warn('Advertencia Supabase al actualizar categoría:', e.message);
-    }
 
     console.log(`✅ Producto ${prodId} categoría=${categoria} actualizada.`);
     return res.status(200).json({ ok: true, message: 'Categoría actualizada con éxito.', id: prodId, categoria });
@@ -2270,18 +2290,13 @@ app.put('/api/admin/products/:id/stock', requireAdmin, async (req, res) => {
   try {
     const prodId = parseInt(id, 10);
 
-    // Actualizar en fallback en memoria
+    // Base primero: la copia en memoria solo cambia si la base respondió sin error
+    const { error: dbErr } = await supabase.from('producto').update({ stock: numStock }).eq('id_producto', prodId);
+    if (falloSupabase(res, dbErr, 'Error al actualizar el stock disponible.')) return;
+
     const fbItem = FALLBACK_PRODUCTS.find(p => p.id_producto === prodId);
     if (fbItem) {
       fbItem.stock = numStock;
-      fbItem.stock_disponible = numStock;
-    }
-
-    // Intentar Supabase
-    try {
-      await supabase.from('producto').update({ stock: numStock, stock_disponible: numStock }).eq('id_producto', prodId);
-    } catch (e) {
-      console.warn('Advertencia Supabase al actualizar stock:', e.message);
     }
 
     console.log(`✅ Producto ${prodId} stock=${numStock} actualizado.`);
@@ -2383,89 +2398,117 @@ app.get('/api/products', async (req, res) => {
 // (PSE, Nequi, Botón Bancolombia) para fines de laboratorio escolar.
 // Ver docs/PAYMENT_GATEWAY.md para instrucciones de migración a Wompi real.
 
-// Almacén en memoria para transacciones de pago simuladas
-var paymentTransactions = [];
-if (typeof mockDb !== 'undefined') {
-  mockDb.transaccion_pago = mockDb.transaccion_pago || [];
-}
+// Almacén en memoria para transacciones de pago simuladas (solo las últimas MAX_TRANSACCIONES_MEMORIA)
+const MAX_TRANSACCIONES_MEMORIA = 100;
+const paymentTransactions = [];
 
 function getPaymentTransactions() {
-  if (typeof mockDb !== 'undefined' && mockDb.transaccion_pago) {
-    return mockDb.transaccion_pago;
-  }
-  return paymentTransactions || [];
+  return paymentTransactions;
 }
 
 function pushPaymentTransaction(txn) {
-  if (typeof mockDb !== 'undefined' && mockDb.transaccion_pago) {
-    mockDb.transaccion_pago.push(txn);
-  } else if (typeof paymentTransactions !== 'undefined') {
-    paymentTransactions.push(txn);
+  paymentTransactions.push(txn);
+  if (paymentTransactions.length > MAX_TRANSACCIONES_MEMORIA) {
+    paymentTransactions.splice(0, paymentTransactions.length - MAX_TRANSACCIONES_MEMORIA);
   }
 }
+app.locals.getPaymentTransactions = getPaymentTransactions;
 
-app.post('/api/payments/process', async (req, res) => {
-  const { method, bank, items, amount, reference, userId, deliveryDetails, forceDecline } = req.body;
+// Errores de negocio de la función registrar_venta (message del error) -> respuesta HTTP.
+const ERRORES_VENTA = {
+  STOCK_INSUFICIENTE: { status: 409, message: 'No hay suficiente stock de uno de los productos. Revisa tu carrito.' },
+  PRODUCTO_NO_EXISTE: { status: 400, message: 'Uno de los productos del carrito ya no existe.' },
+  PRODUCTO_INACTIVO: { status: 400, message: 'Uno de los productos del carrito ya no está disponible.' },
+  CANTIDAD_INVALIDA: { status: 400, message: 'La cantidad de un producto no es válida.' },
+  CARRITO_VACIO: { status: 400, message: 'El carrito está vacío.' },
+  CARRITO_DEMASIADO_GRANDE: { status: 400, message: 'El carrito tiene demasiados productos.' },
+  ITEM_INVALIDO: { status: 400, message: 'Uno de los productos del carrito no es válido.' },
+  USUARIO_NO_EXISTE: { status: 400, message: 'Tu sesión ya no es válida, vuelve a iniciar sesión.' }
+};
+const ERROR_VENTA_GENERICO = { status: 500, message: 'No pudimos registrar tu pedido. Intenta de nuevo más tarde.' };
+
+function errorDeVenta(error) {
+  return ERRORES_VENTA[error && error.message] || ERROR_VENTA_GENERICO;
+}
+
+const MAX_CANTIDAD_ITEM = 99;
+const MAX_ITEMS_CARRITO = 50;
+
+// Valida el carrito del cliente. Devuelve { items:[{id_producto,cantidad}] } o { error:'mensaje' }.
+// Los precios que mande el cliente se ignoran: el precio real lo pone la base.
+function validarCarrito(items) {
+  if (!Array.isArray(items) || items.length === 0) {
+    return { error: 'El carrito está vacío.' };
+  }
+  if (items.length > MAX_ITEMS_CARRITO) {
+    return { error: `El carrito no puede tener más de ${MAX_ITEMS_CARRITO} productos.` };
+  }
+  const validos = [];
+  for (const it of items) {
+    const idProducto = Number(it && (it.id_producto || it.id));
+    const bruta = it && typeof it.quantity === 'string' && it.quantity.trim() !== '' ? Number(it.quantity) : it && it.quantity;
+    if (!Number.isInteger(idProducto) || idProducto <= 0) {
+      return { error: 'Uno de los productos del carrito no es válido.' };
+    }
+    if (!Number.isInteger(bruta) || bruta < 1 || bruta > MAX_CANTIDAD_ITEM) {
+      return { error: `La cantidad de cada producto debe ser un número entero entre 1 y ${MAX_CANTIDAD_ITEM}.` };
+    }
+    validos.push({ id_producto: idProducto, cantidad: bruta });
+  }
+  return { items: validos };
+}
+
+function escapeHtml(valor) {
+  return String(valor ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+// Límite de intentos solo para el pago (anti bots/abuso). Configurable por entorno:
+//   PAYMENT_RATE_LIMIT_MAX (peticiones por ventana, 10 por defecto) y PAYMENT_RATE_LIMIT_WINDOW_MS (60000).
+const VENTANA_PAGOS_MS = Number(process.env.PAYMENT_RATE_LIMIT_WINDOW_MS) || 60 * 1000;
+const limitadorPagos = rateLimit({
+  windowMs: VENTANA_PAGOS_MS,
+  limit: Number(process.env.PAYMENT_RATE_LIMIT_MAX) || 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: (req, res) =>
+    res.status(429).json({ ok: false, message: `Demasiados intentos de pago. Espera ${Math.ceil(VENTANA_PAGOS_MS / 60000)} minuto(s) e inténtalo de nuevo.` })
+});
+
+const MAX_LARGO_BANCO = 80;
+const MAX_LARGO_REFERENCIA = 64;
+
+app.post('/api/payments/process', limitadorPagos, async (req, res) => {
+  const { method, bank, items, reference, userId, forceDecline } = req.body;
 
   // ── Validaciones ────────────────────────────────────────────
   const validMethods = ['PSE', 'NEQUI', 'BANCOLOMBIA'];
-  if (!method || !validMethods.includes(method.toUpperCase())) {
+  if (typeof method !== 'string' || !validMethods.includes(method.toUpperCase())) {
     return res.status(400).json({ 
       ok: false, 
       message: `Método de pago inválido. Opciones: ${validMethods.join(', ')}` 
     });
   }
 
+  if (bank !== undefined && bank !== null && (typeof bank !== 'string' || bank.length > MAX_LARGO_BANCO)) {
+    return res.status(400).json({ ok: false, message: `El banco debe ser un texto de máximo ${MAX_LARGO_BANCO} caracteres.` });
+  }
+  if (reference !== undefined && reference !== null && (typeof reference !== 'string' || reference.length > MAX_LARGO_REFERENCIA)) {
+    return res.status(400).json({ ok: false, message: `La referencia debe ser un texto de máximo ${MAX_LARGO_REFERENCIA} caracteres.` });
+  }
+
   if (method.toUpperCase() === 'PSE' && !bank) {
     return res.status(400).json({ ok: false, message: 'Debe seleccionar un banco para PSE.' });
   }
 
-  // ── Recalcular/Obtener monto en COP ──────────────────────────
-  let serverTotal = 0;
-  const resolvedItems = [];
-
-  if (Array.isArray(items) && items.length > 0) {
-    for (const cartItem of items) {
-      const productId = cartItem.id || cartItem.id_producto;
-      const quantity = parseInt(cartItem.quantity, 10) || 1;
-
-      let serverProduct = FALLBACK_PRODUCTS.find(p => p.id_producto === productId);
-
-      if (!serverProduct && productId) {
-        try {
-          const { data: dbProd } = await supabase
-            .from('producto')
-            .select('id_producto, nombre, precio')
-            .eq('id_producto', productId)
-            .single();
-          if (dbProd) serverProduct = dbProd;
-        } catch (e) { /* Supabase no disponible */ }
-      }
-
-      const unitPrice = serverProduct ? serverProduct.precio : (cartItem.price || cartItem.precio || 0);
-      const itemTotal = unitPrice * quantity;
-      serverTotal += itemTotal;
-      resolvedItems.push({
-        name: serverProduct ? serverProduct.nombre : (cartItem.name || cartItem.nombre || `Producto ${productId}`),
-        quantity,
-        price: unitPrice,
-        subtotal: itemTotal
-      });
-    }
-  }
-
-  if (serverTotal === 0 && amount && !isNaN(Number(amount))) {
-    serverTotal = Number(amount);
-  }
-
-  if (serverTotal <= 0) {
-    return res.status(400).json({ ok: false, message: 'El monto de la transacción debe ser mayor a 0 COP.' });
+  const carrito = validarCarrito(items);
+  if (carrito.error) {
+    return res.status(400).json({ ok: false, message: carrito.error });
   }
 
   // ── Referencia única de pedido y transacción ─────────────────
   const timestamp = Date.now();
   const randomSuffix = crypto.randomBytes(3).toString('hex').toUpperCase();
-  const orderReference = reference || req.body.orderReference || `ORD-SG-${timestamp}-${randomSuffix}`;
+  const orderReference = reference || `ORD-SG-${timestamp}-${randomSuffix}`;
   const transactionId = `TXN-SG-${timestamp}-${randomSuffix}`;
 
   // ── Determinar resultado (ponderado o forzado) ──────────────
@@ -2489,6 +2532,28 @@ app.post('/api/payments/process', async (req, res) => {
   const latency = 1000 + Math.floor(Math.random() * 1000); // 1.0 - 2.0 segundos
   await new Promise(resolve => setTimeout(resolve, latency));
 
+  // ── Registrar la venta en la base (descuenta stock y calcula el total real) ──
+  const estadoVenta = status === 'APPROVED' ? 'Pagado' : 'Fallido';
+  const { data: venta, error: ventaErr } = await supabase.rpc('registrar_venta', {
+    p_id_usuario: userId ?? null,
+    p_items: carrito.items,
+    p_estado: estadoVenta
+  });
+
+  if (ventaErr || !venta || venta.id_venta === undefined || venta.id_venta === null) {
+    console.error('Error al registrar la venta:', ventaErr);
+    const { status: httpStatus, message } = errorDeVenta(ventaErr);
+    return res.status(httpStatus).json({ ok: false, message });
+  }
+
+  const serverTotal = venta.total;
+  const resolvedItems = (venta.items || []).map((i) => ({
+    name: i.nombre,
+    quantity: i.cantidad,
+    price: i.precio_unitario,
+    subtotal: i.subtotal
+  }));
+
   // ── Construir objeto de transacción ─────────────────────────
   const transaction = {
     id: transactionId,
@@ -2505,26 +2570,6 @@ app.post('/api/payments/process', async (req, res) => {
   // Guardar resultado de transacción en estado/memoria local
   pushPaymentTransaction(transaction);
 
-  // ── Guardar en Base de Datos (Supabase) ─────────────────────
-  try {
-    const finalUserId = userId || 1; // Fallback para usuario demo
-    const { data: newOrder, error: orderErr } = await supabase
-      .from('venta')
-      .insert([{ 
-        id_usuario: finalUserId, 
-        total: serverTotal, 
-        fecha: new Date().toISOString(),
-        estado: status === 'APPROVED' ? 'Pagado' : 'Fallido'
-      }])
-      .select().single();
-
-    if (orderErr) {
-      console.warn('Advertencia al guardar orden en base de datos:', orderErr.message);
-    }
-  } catch (dbErr) {
-    console.warn('Error al interactuar con Supabase en pasarela de pago:', dbErr.message);
-  }
-
   // ── Si APPROVED: enviar correo de confirmación ───────────────
   if (status === 'APPROVED' && userId) {
     try {
@@ -2537,9 +2582,8 @@ app.post('/api/payments/process', async (req, res) => {
       if (user && user.email) {
         const deliveryTime = Math.floor(Math.random() * (45 - 30 + 1) + 30);
         const itemsHtml = resolvedItems.length > 0
-          ? `<ul>${resolvedItems.map(item => `<li><strong>${item.name}</strong> x ${item.quantity} - $${item.price.toLocaleString('es-CO')}</li>`).join('')}</ul>`
+          ? `<ul>${resolvedItems.map(item => `<li><strong>${escapeHtml(item.name)}</strong> x ${item.quantity} - $${Number(item.price).toLocaleString('es-CO')}</li>`).join('')}</ul>`
           : '<p>Detalles del pedido procesados exitosamente.</p>';
-
         const emailTransporter = await getTransporter();
         const fromEmail = process.env.SMTP_USER || 'no-reply@supergelatto.com';
 
@@ -2549,20 +2593,20 @@ app.post('/api/payments/process', async (req, res) => {
           subject: '🍦 ¡Pago confirmado y pedido en camino!',
           html: `
             <div style="font-family: Arial, sans-serif; color: #333; max-width: 600px; margin: 0 auto; border: 1px solid #eee; padding: 20px; border-radius: 10px;">
-              <h2 style="color: #ac2a5d; text-align: center;">¡Hola ${user.nombre}!</h2>
+              <h2 style="color: #ac2a5d; text-align: center;">¡Hola ${escapeHtml(user.nombre)}!</h2>
               <p style="font-size: 16px; text-align: center;">Tu pago ha sido <strong style="color: #22c55e;">aprobado exitosamente</strong>.</p>
               
               <div style="background-color: #f0fdf4; padding: 15px; border-radius: 8px; margin: 15px 0; border: 1px solid #bbf7d0;">
                 <h3 style="margin-top: 0; color: #16a34a;">✅ Datos de la transacción:</h3>
-                <p style="margin: 4px 0;"><strong>Referencia:</strong> ${orderReference}</p>
-                <p style="margin: 4px 0;"><strong>Método:</strong> ${method.toUpperCase()} ${bank ? '- ' + bank : ''}</p>
+                <p style="margin: 4px 0;"><strong>Referencia:</strong> ${escapeHtml(orderReference)}</p>
+                <p style="margin: 4px 0;"><strong>Método:</strong> ${escapeHtml(method.toUpperCase())} ${bank ? '- ' + escapeHtml(bank) : ''}</p>
                 <p style="margin: 4px 0;"><strong>Código de autorización:</strong> ${authCode}</p>
               </div>
 
               <div style="background-color: #f9f9f9; padding: 15px; border-radius: 8px; margin: 20px 0;">
                 <h3 style="margin-top: 0; color: #705d00;">Resumen de tu pedido:</h3>
                 ${itemsHtml}
-                <p style="font-size: 18px; border-top: 1px solid #ddd; padding-top: 10px;"><strong>Total: $${serverTotal.toLocaleString('es-CO')}</strong></p>
+                <p style="font-size: 18px; border-top: 1px solid #ddd; padding-top: 10px;"><strong>Total: $${Number(serverTotal).toLocaleString('es-CO')}</strong></p>
               </div>
               
               <div style="text-align: center; margin: 30px 0; padding: 20px; border: 2px dashed #ac2a5d; border-radius: 15px;">
@@ -2593,6 +2637,8 @@ app.post('/api/payments/process', async (req, res) => {
 
   return res.status(200).json({
     ok: status === 'APPROVED',
+    id_venta: venta.id_venta,
+    total: serverTotal,
     transaction,
     message: status === 'APPROVED' 
       ? '¡Pago aprobado exitosamente!' 
@@ -2634,14 +2680,14 @@ app.get('/api/admin/products/:id/model-3d', async (req, res) => {
       const taskInfo = await getTripoTaskStatus(modelState.taskId);
 
       if (taskInfo.status === 'success' && taskInfo.modelUrl) {
+        // Primero se guarda en la base: si falla, el estado sigue "generando" y se reintenta en la próxima consulta.
+        const { error: dbErr } = await supabase.from('producto').update({ model_3d_url: taskInfo.modelUrl }).eq('id_producto', prodId);
+        if (falloSupabase(res, dbErr, 'No se pudo guardar el modelo 3D del producto.')) return;
+
         TRIPO_MODELS_STATE[prodId].estado = 'listo';
         TRIPO_MODELS_STATE[prodId].url = taskInfo.modelUrl;
         TRIPO_MODELS_STATE[prodId].glb_url = taskInfo.modelUrl;
         saveTripoModelsState(TRIPO_MODELS_STATE);
-
-        try {
-          await supabase.from('producto').update({ model_3d_url: taskInfo.modelUrl }).eq('id_producto', prodId);
-        } catch (e) {}
 
         return res.status(200).json({
           estado: 'listo',
@@ -2707,4 +2753,8 @@ app.post('/api/admin/products/:id/regenerate-3d', requireAdmin, async (req, res)
   }
 });
 
-app.listen(PORT, () => console.log(`🍦 Servidor en puerto ${PORT}`));
+if (require.main === module) {
+  app.listen(PORT, () => console.log(`🍦 Servidor en puerto ${PORT}`));
+}
+
+module.exports = app;
