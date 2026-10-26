@@ -1,3 +1,6 @@
+// Cambia la contraseña (y deja rol admin) de las cuentas de ADMIN_EMAILS. Uso:
+//   ADMIN_EMAILS=a@x.com,b@y.com ADMIN_RESET_PASSWORD=... node scripts/reset_admin_pass.js
+// Los correos y la contraseña van en variables de entorno, nunca en el código.
 const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '../.env') });
 const { createClient } = require('@supabase/supabase-js');
@@ -11,37 +14,27 @@ if (!supabaseUrl || !supabaseKey) {
   process.exit(1);
 }
 
+const correos = String(process.env.ADMIN_EMAILS || '').split(',').map((e) => e.trim().toLowerCase()).filter(Boolean);
+const password = process.env.ADMIN_RESET_PASSWORD || '';
+if (!correos.length || password.length < 12) {
+  console.error('❌ Define ADMIN_EMAILS y ADMIN_RESET_PASSWORD (12+ caracteres) en el entorno.');
+  process.exit(1);
+}
+
 const supabase = createClient(supabaseUrl, supabaseKey);
 
 async function fixPasswords() {
-  const hash = await bcrypt.hash('gelato1234', 10);
-  console.log('Generated Hash for "gelato1234":', hash);
+  const hash = await bcrypt.hash(password, 10);
 
-  const { error: err1 } = await supabase
-    .from('usuario')
-    .update({ password_hash: hash, rol: 'admin' })
-    .eq('email', 'muneracristian63@gmail.com');
-  console.log('Update muneracristian63:', err1 ? err1.message : 'OK');
+  for (const email of correos) {
+    const { error } = await supabase
+      .from('usuario')
+      .update({ password_hash: hash, rol: 'admin' })
+      .eq('email', email);
+    console.log(`Actualizar ${email}:`, error ? error.message : 'OK');
+  }
 
-  const { error: err2 } = await supabase
-    .from('usuario')
-    .update({ password_hash: hash, rol: 'admin' })
-    .eq('email', 'miguelvilla00@gmail.com');
-  console.log('Update miguelvilla00:', err2 ? err2.message : 'OK');
-
-  const { error: err3 } = await supabase
-    .from('usuario')
-    .update({ password_hash: hash, rol: 'admin' })
-    .eq('email', 'emiliofunes28@gmail.com');
-  console.log('Update emiliofunes28:', err3 ? err3.message : 'OK');
-
-  const { error: err4 } = await supabase
-    .from('usuario')
-    .update({ password_hash: hash })
-    .eq('email', 'cristianmunera427@gmail.com');
-  console.log('Update cristianmunera427:', err4 ? err4.message : 'OK');
-
-  console.log('✅ Passwords reset successfully to: gelato1234');
+  console.log('✅ Contraseñas actualizadas.');
 }
 
 fixPasswords();
