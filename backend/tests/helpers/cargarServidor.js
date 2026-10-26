@@ -31,14 +31,20 @@ export const GOOGLE_CLIENT_ID_PRUEBA = 'cliente-google-de-prueba.apps.googleuser
 //  - simulacion: true -> SIMULATION_MODE=true.
 //  - verificadorGoogle: async ({ idToken, audience }) => payload | lanza error. Reemplaza a
 //    google-auth-library (OAuth2Client.verifyIdToken): las pruebas NUNCA llaman a Google de verdad.
+//  - groq: async (parametros) => respuesta. Reemplaza a groq-sdk (chat.completions.create): las pruebas
+//    NUNCA llaman a Groq de verdad. Sin esta opción, cualquier llamada al modelo lanza un error.
+//  - limiteChatbot: tope de peticiones por minuto a /api/chatbot (por defecto muy alto).
 export function cargarServidor(fake, { sinSupabase = false, limitePagos = 100000, produccion = false, render = false, correo = null,
   jwtSecret = JWT_SECRET_PRUEBA, googleClientId = GOOGLE_CLIENT_ID_PRUEBA, adminEmails = '', superAdmin = '',
-  simulacion = false, verificadorGoogle = null } = {}) {
+  simulacion = false, verificadorGoogle = null, groq = null, limiteChatbot = 100000 } = {}) {
   // Cadena vacía (no delete): así dotenv no vuelve a leerlas de un .env local.
   process.env.SUPABASE_URL = sinSupabase ? '' : 'http://supabase.fake.local';
   process.env.SUPABASE_SERVICE_ROLE_KEY = sinSupabase ? '' : 'service-role-key-falsa';
   process.env.SUPABASE_KEY = '';
   process.env.PAYMENT_RATE_LIMIT_MAX = String(limitePagos);
+  process.env.CHATBOT_RATE_LIMIT_MAX = String(limiteChatbot);
+  // Llave ficticia (no vacía) para que chatbot.js cree el cliente; el cliente es el falso de abajo.
+  process.env.GROQ_API_KEY = 'groq-llave-falsa-de-prueba';
   process.env.JWT_SECRET = jwtSecret;
   process.env.GOOGLE_CLIENT_ID = googleClientId;
   process.env.ADMIN_EMAILS = adminEmails;
@@ -91,11 +97,26 @@ export function cargarServidor(fake, { sinSupabase = false, limitePagos = 100000
   }
   requireNode.cache[rutaGoogle] = { id: rutaGoogle, filename: rutaGoogle, loaded: true, exports: { OAuth2Client } };
 
+  // groq-sdk falso: por defecto, cualquier llamada al modelo falla (ninguna prueba llega a Groq real).
+  const rutaGroq = requireNode.resolve('groq-sdk');
+  const crear = groq || (async () => { throw new Error('Groq no disponible en pruebas'); });
+  class Groq {
+    constructor() {
+      this.chat = { completions: { create: (parametros) => crear(parametros) } };
+    }
+  }
+  requireNode.cache[rutaGroq] = { id: rutaGroq, filename: rutaGroq, loaded: true, exports: Groq };
+
   const rutaServer = resolve(raiz, 'server.js');
   delete requireNode.cache[rutaServer];
+  // chatbot.js crea su cliente Groq al cargarse: se recarga para que use el falso de esta prueba.
+  delete requireNode.cache[resolve(raiz, 'chatbot.js')];
   const app = requireNode(rutaServer);
   return { app, escrituras };
 }
+
+// Token firmado con el secreto de prueba (solo HS256), con los datos que se pasen.
+export const tokenPrueba = (datos) => jwt.sign(datos, JWT_SECRET_PRUEBA, { algorithm: 'HS256', expiresIn: '1h' });
 
 export const authAdmin = () => ({
   Authorization: `Bearer ${jwt.sign({ id_usuario: 1, rol: 'admin' }, JWT_SECRET_PRUEBA, { algorithm: 'HS256', expiresIn: '1h' })}`,
