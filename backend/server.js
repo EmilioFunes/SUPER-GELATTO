@@ -2662,8 +2662,23 @@ app.post('/api/payments/process', limitadorPagos, async (req, res) => {
 });
 
 // ─── Chatbot (MCP RBAC) ──────────────────────────────────────
-app.post('/api/chatbot', async (req, res) => {
-  await handleChatbotRequest(req, res, supabase);
+// Límite de mensajes al chatbot (cada uno cuesta llamadas al modelo). Configurable por entorno:
+//   CHATBOT_RATE_LIMIT_MAX (mensajes por ventana, 20 por defecto) y CHATBOT_RATE_LIMIT_WINDOW_MS (60000).
+const VENTANA_CHATBOT_MS = Number(process.env.CHATBOT_RATE_LIMIT_WINDOW_MS) || 60 * 1000;
+const limitadorChatbot = rateLimit({
+  windowMs: VENTANA_CHATBOT_MS,
+  limit: Number(process.env.CHATBOT_RATE_LIMIT_MAX) || 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: (req, res) =>
+    res.status(429).json({ ok: false, message: `Demasiados mensajes seguidos. Espera ${Math.ceil(VENTANA_CHATBOT_MS / 60000)} minuto(s) e inténtalo de nuevo.` })
+});
+
+// La identidad del chatbot sale SOLO del token (Authorization: Bearer). Sin token válido = visitante anónimo.
+app.post('/api/chatbot', limitadorChatbot, async (req, res) => {
+  const authHeader = req.headers['authorization'] || '';
+  const sesion = authHeader.startsWith('Bearer ') ? verifyTokenSafely(authHeader.slice(7)) : null;
+  await handleChatbotRequest(req, res, supabase, { sesion, estadosCobrados: ESTADOS_COBRADOS });
 });
 
 // ─── TRI PO 3D AI GENERATOR ENDPOINTS ─────────────────────────

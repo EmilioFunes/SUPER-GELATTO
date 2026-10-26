@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Send, Mic } from 'lucide-react';
 import { useCart } from '../context/CartContext';
+import { getToken } from '../utils/api';
 
 const parseInlineStyles = (text) => {
   if (typeof text !== 'string') return text;
@@ -129,29 +130,37 @@ const Gelbot = ({ user }) => {
     setIsLoading(true);
 
     try {
-      // Enviamos el historial para mantener contexto
-      const chatHistory = messages.map(m => ({
+      // Enviamos solo los últimos turnos para mantener contexto (el servidor acota igual).
+      const chatHistory = messages.slice(-20).map(m => ({
         role:    m.sender === 'bot' ? 'assistant' : 'user',
-        content: m.text
+        content: String(m.text || '')
       }));
+
+      // Quién eres lo decide el servidor con tu token de sesión (nunca datos que mande el navegador).
+      const token = getToken();
+      const headers = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
 
       const response = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/chatbot`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({
           message: input,
-          userId:  user?.id,
-          userName: user?.name,
-          userRole: user?.rol,
           history: chatHistory
         })
       });
 
+      const data = await response.json().catch(() => ({}));
+
+      // 400 (mensaje inválido) y 429 (demasiados mensajes) traen un mensaje en español para mostrar.
+      if ((response.status === 400 || response.status === 429) && data.message) {
+        setMessages(prev => [...prev, { id: Date.now() + 1, text: data.message, sender: 'bot' }]);
+        return;
+      }
       if (!response.ok) {
         throw new Error(`Error del servidor: ${response.status}`);
       }
 
-      const data = await response.json();
       if (data.error) throw new Error(data.error);
 
       // Acción: añadir producto al carrito
