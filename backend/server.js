@@ -896,6 +896,7 @@ const limitadorGoogleLogin = crearLimitadorCuenta();
 const limitadorRegistro = crearLimitadorCuenta();
 const limitadorOlvidoClave = crearLimitadorCuenta();
 const limitadorLoginFacial = crearLimitadorCuenta();
+const limitadorCrearAdmin = crearLimitadorCuenta();
 
 // Helper para asignar imágenes reales basadas en el nombre
 function getProductImage(name) {
@@ -2023,38 +2024,50 @@ app.put('/api/admin/sales/:id/status', requireAdmin, async (req, res) => {
 // Las antiguas POST /api/orders y POST /api/sales se eliminaron: ninguna pantalla las usaba y guardaban
 // ventas sin sesión, con el total que mandaba el navegador.
 
-// Endpoint para crear un nuevo Administrador y enrolar su Face ID
-app.post('/api/admin/create-admin', requireAdmin, async (req, res) => {
-  let { name, lastName, email, password } = req.body;
-  if (!name || !email || !password) {
-    return res.status(400).json({ message: 'Nombre, correo y contraseña son obligatorios.' });
+// Crear administradores: solo el super admin. Su propio correo (SUPER_ADMIN_EMAIL) nunca se puede crear aquí
+// (si no existiera aún, otro admin podría quedarse con esa cuenta); los de ADMIN_EMAILS sí, porque quien
+// crea es el super admin. Respuesta solo con columnas seguras.
+app.post('/api/admin/create-admin', requireAdmin, limitadorCrearAdmin, async (req, res) => {
+  if (!esSuperAdminEmail(req.user?.email)) {
+    return res.status(403).json({ ok: false, message: 'Solo el super administrador puede crear administradores.' });
+  }
+  const { name, lastName, email, password } = req.body || {};
+  const nombre = typeof name === 'string' ? name.trim() : '';
+  const apellido = lastName == null || lastName === '' ? '' : typeof lastName === 'string' ? lastName.trim() : null;
+  const correo = typeof email === 'string' ? email.trim().toLowerCase() : '';
+  if (nombre.length < 1 || nombre.length > 100 || apellido === null || apellido.length > 100) {
+    return res.status(400).json({ ok: false, message: 'El nombre y el apellido deben ser texto de hasta 100 caracteres.' });
+  }
+  if (!/^[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.(com|net|edu)$/i.test(correo)) {
+    return res.status(400).json({ ok: false, message: 'El correo debe ser un email válido (sin caracteres especiales) terminado en .com, .net o .edu.' });
+  }
+  if (typeof password !== 'string' || password.length < 8 || password.length > 128) {
+    return res.status(400).json({ ok: false, message: 'La contraseña debe tener entre 8 y 128 caracteres.' });
+  }
+  if (esSuperAdminEmail(correo)) {
+    return res.status(403).json({ ok: false, message: 'No se puede crear una cuenta con ese correo.' });
   }
 
-  try {
-    const hashedPassword = await bcrypt.hash(password, saltRounds);
+  const { usuario: existente, error: errorBusqueda } = await buscarUsuarioPorEmail(correo);
+  if (falloSupabase(res, errorBusqueda, 'No se pudo crear el administrador. Inténtalo más tarde.')) return;
+  if (existente) return res.status(409).json({ ok: false, message: 'El email ya está registrado.' });
 
-    const { data: newUser, error } = await supabase
-      .from('usuario')
-      .insert([{ nombre: name, apellido: lastName || '', email, password_hash: hashedPassword, rol: 'admin' }])
-      .select()
-      .single();
+  const hashedPassword = await bcrypt.hash(password, saltRounds);
+  const { data: newUser, error } = await supabase
+    .from('usuario')
+    .insert([{ nombre, apellido, email: correo, password_hash: hashedPassword, rol: 'admin' }])
+    .select('id_usuario, nombre, apellido, email, rol')
+    .single();
+  if (error?.code === '23505') return res.status(409).json({ ok: false, message: 'El email ya está registrado.' });
+  if (falloSupabase(res, error, 'No se pudo crear el administrador. Inténtalo más tarde.')) return;
 
-    if (error) {
-      console.error('Error al insertar nuevo admin:', error);
-      throw error;
-    }
-
-    const createdUser = newUser || { id_usuario: Date.now(), nombre: name, apellido: lastName, email, rol: 'admin' };
-
-    return res.status(201).json({
-      ok: true,
-      message: 'Administrador registrado con éxito.',
-      user: createdUser
-    });
-  } catch (error) {
-    console.error('Error en /api/admin/create-admin:', error);
-    return res.status(500).json({ message: error.message || 'Error interno al crear el administrador.' });
-  }
+  // Se arma el objeto campo por campo: aunque la consulta cambie, nunca sale password_hash.
+  const { id_usuario, nombre: nombreNuevo, apellido: apellidoNuevo, email: emailNuevo, rol } = newUser;
+  return res.status(201).json({
+    ok: true,
+    message: 'Administrador registrado con éxito.',
+    user: { id_usuario, nombre: nombreNuevo, apellido: apellidoNuevo, email: emailNuevo, rol }
+  });
 });
 
 // Nota: Para añadir un usuario se usa el flujo de /api/register (con o sin admin check).
